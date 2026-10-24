@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <ProjectReference Include="..\Simorgh.AI.Abstractions\Simorgh.AI.Abstractions.csproj"/>
+    </ItemGroup>
+
+    <PropertyGroup>
+        <Description>Provider and service integrations for the Simorgh.AI framework.</Description>
+    </PropertyGroup>
+
+</Project>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <ProjectReference Include="..\Simorgh.AI.Abstractions\Simorgh.AI.Abstractions.csproj"/>
+        <PackageReference Include="Microsoft.Extensions.AI"/>
+    </ItemGroup>
+
+    <PropertyGroup>
+        <Description>Core runtime and orchestration components for the Simorgh.AI framework.</Description>
+        <!-- UsageDetails per-modality properties are marked evaluation-only (MEAI001); used intentionally. -->
+        <NoWarn>$(NoWarn);MEAI001</NoWarn>
+    </PropertyGroup>
+
+</Project>

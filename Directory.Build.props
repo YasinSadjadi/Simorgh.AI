@@ -1,0 +1,16 @@
+<Project>
+    <PropertyGroup>
+        <TargetFramework>netstandard2.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <LangVersion>latest</LangVersion>
+
+        <Version>0.1.0</Version>
+        <Authors>Simorgh AI Contributors</Authors>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+        <PackageId>$(MSBuildProjectName)</PackageId>
+        <PackageTags>ai;dotnet;artificial-intelligence</PackageTags>
+        <IsPackable>true</IsPackable>
+    </PropertyGroup>
+</Project>

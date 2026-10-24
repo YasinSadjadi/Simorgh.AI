@@ -1,0 +1,20 @@
+namespace Simorgh.AI.Abstractions.Contents;
+
+/// <summary>
+///     Video content (input video or generated video).
+/// </summary>
+/// <param name="durationSeconds">Duration of the video in seconds, when known.</param>
+/// <param name="caption">Optional caption or description of the video.</param>
+public sealed class AiVideoContent(
+    string mimeType,
+    ReadOnlyMemory<byte>? data = null,
+    Uri? url = null,
+    double? durationSeconds = null,
+    string? caption = null) : AiMediaContent(mimeType, data, url)
+{
+    /// <summary>Duration of the video in seconds, when known.</summary>
+    public double? DurationSeconds { get; } = durationSeconds;
+
+    /// <summary>Optional caption or description of the video.</summary>
+    public string? Caption { get; } = caption;
+}

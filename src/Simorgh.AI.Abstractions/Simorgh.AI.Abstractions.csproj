@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Extensions.AI.Abstractions"/>
+    </ItemGroup>
+
+    <PropertyGroup>
+        <Description>Public contracts and shared types for the Simorgh.AI framework.</Description>
+    </PropertyGroup>
+
+</Project>
