@@ -126,6 +126,9 @@ internal sealed class AgentRun : IAgentRun
     ///     When <c>true</c>, the response is streamed and each text delta is raised as an
     ///     <see cref="AgentStreamUpdate" /> while it is produced.
     /// </param>
+    /// <param name="chatClient">Client used to perform the model call.</param>
+    /// <param name="declarations">Tool declarations exposed to the model, possibly empty.</param>
+    /// <param name="context">Context of the run the call belongs to.</param>
     private async Task<AiMessage> CallModelAsync(
         IChatClient chatClient, IReadOnlyList<AiToolDeclaration> declarations, AgentRunContext context,
         bool stream)

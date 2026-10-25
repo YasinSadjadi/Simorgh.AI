@@ -17,12 +17,14 @@ public abstract class AgentUpdate(string runId, DateTimeOffset? timestampUtc = n
 }
 
 /// <summary>The run has started.</summary>
+/// <param name="runId">Id of the run that has started.</param>
 public sealed class AgentRunStartedUpdate(string runId) : AgentUpdate(runId);
 
 /// <summary>
 ///     An intermediate message produced during the run (e.g. a tool call/result round-trip),
 ///     not the final answer.
 /// </summary>
+/// <param name="runId">Id of the run this update belongs to.</param>
 /// <param name="message">The intermediate message.</param>
 public sealed class AgentMessageUpdate(string runId, AiMessage message) : AgentUpdate(runId)
 {
@@ -31,6 +33,7 @@ public sealed class AgentMessageUpdate(string runId, AiMessage message) : AgentU
 }
 
 /// <summary>The run finished successfully; <see cref="Message" /> is the agent's final answer.</summary>
+/// <param name="runId">Id of the run that has completed.</param>
 /// <param name="message">The agent's final answer.</param>
 public sealed class AgentRunCompletedUpdate(string runId, AiMessage message) : AgentUpdate(runId)
 {
@@ -39,6 +42,7 @@ public sealed class AgentRunCompletedUpdate(string runId, AiMessage message) : A
 }
 
 /// <summary>The run failed.</summary>
+/// <param name="runId">Id of the run that has failed.</param>
 /// <param name="error">Description of what went wrong.</param>
 public sealed class AgentRunFailedUpdate(string runId, string error) : AgentUpdate(runId)
 {

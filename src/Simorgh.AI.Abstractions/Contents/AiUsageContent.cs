@@ -19,6 +19,7 @@ public sealed class AiUsageContent(
     /// <summary>Tokens produced on the output side.</summary>
     public long OutputTokens { get; } = outputTokens;
 
+    /// <summary>Sum of <see cref="InputTokens" /> and <see cref="OutputTokens" />.</summary>
     public long TotalTokens => InputTokens + OutputTokens;
 
     /// <summary>Detail per input modality (text, image, audio, cached), when the provider reports it.</summary>

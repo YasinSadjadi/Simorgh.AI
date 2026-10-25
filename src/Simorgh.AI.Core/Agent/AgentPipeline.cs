@@ -9,15 +9,19 @@ namespace Simorgh.AI.Core.Agent;
 ///     Builds the nested middleware chain and exposes entry points for each pipeline point.
 ///     Middleware execute in registration order on the way in, and reverse order on the way out.
 /// </summary>
+/// <param name="middlewares">Middleware to wrap the execution chain with, in registration order.</param>
 public sealed class AgentPipeline(IEnumerable<AgentMiddleware>? middlewares)
 {
+    /// <summary>Middleware to execute, in registration order.</summary>
     public readonly IReadOnlyList<AgentMiddleware> Middlewares = middlewares?.ToArray() ?? [];
 
+    /// <summary>Runs <see cref="AgentMiddleware.OnStartupAsync" /> on every middleware, in registration order.</summary>
     public Task OnStartupAsync(AgentRunContext context, CancellationToken cancellationToken)
     {
         return RunSequentially(m => m.OnStartupAsync(context, cancellationToken), cancellationToken);
     }
 
+    /// <summary>Runs <see cref="AgentMiddleware.OnEndAsync" /> on every middleware, in registration order.</summary>
     public Task OnEndAsync(AgentRunContext context, CancellationToken cancellationToken)
     {
         return RunSequentially(m => m.OnEndAsync(context, cancellationToken), cancellationToken);

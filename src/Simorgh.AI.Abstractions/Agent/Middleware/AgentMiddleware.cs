@@ -18,6 +18,7 @@ public delegate Task<AiToolResultContent> AgentToolInvokeDelegate(
 /// </summary>
 public abstract class AgentMiddleware : IDisposable
 {
+    /// <summary>Releases resources held by the middleware; called when the owning client or run is disposed.</summary>
     public virtual void Dispose()
     {
     }

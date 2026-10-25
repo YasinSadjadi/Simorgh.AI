@@ -5,6 +5,7 @@ namespace Simorgh.AI.Abstractions.Agent;
 ///     generating. Only raised for runs submitted with streaming enabled
 ///     (<see cref="AgentRunRequest.Stream" />).
 /// </summary>
+/// <param name="runId">Id of the run this update belongs to.</param>
 /// <param name="textDelta">The text produced since the previous update.</param>
 public sealed class AgentStreamUpdate(string runId, string textDelta) : AgentUpdate(runId)
 {

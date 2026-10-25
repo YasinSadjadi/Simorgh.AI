@@ -19,5 +19,6 @@ public abstract class AiMediaContent(string mimeType, ReadOnlyMemory<byte>? data
     /// <summary>Remote location of the media, when the payload is not inline.</summary>
     public Uri? Url { get; } = url;
 
+    /// <summary><c>true</c> when the payload is inline (<see cref="Data" />), <c>false</c> when it is remote (<see cref="Url" />).</summary>
     public bool IsInline => Data.HasValue;
 }
