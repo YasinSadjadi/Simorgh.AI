@@ -38,71 +38,42 @@ public sealed class AgentTelemetryMiddleware(
     }
 
     /// <inheritdoc />
-    public override async Task<AiMessage> InvokeResponseAsync(AgentRunContext context, AgentResponseDelegate next)
+    public override Task OnBeforeAgentResponseAsync(
+        AgentRunContext context, CancellationToken cancellationToken = default)
     {
-        var collector = GetCollector(context);
-        collector?.ModelStopwatch.Restart();
-        try
-        {
-            var response = await next(context).ConfigureAwait(false);
-            collector?.ModelStopwatch.Stop();
-
-            var usage = response.Contents.OfType<AiUsageContent>().FirstOrDefault();
-            collector?.ModelRoundFinished(usage);
-
-            logger?.LogInformation(
-                "Agent run {RunId} model round {Round} completed in {Duration} ms (input: {InputTokens} tokens, output: {OutputTokens} tokens).",
-                context.RunId, collector?.Telemetry.ModelRounds, collector?.ModelStopwatch.ElapsedMilliseconds,
-                usage?.InputTokens, usage?.OutputTokens);
-            return response;
-        }
-        catch (OperationCanceledException)
-        {
-            if (collector is not null) collector.Telemetry.Cancelled = true;
-            throw;
-        }
-        catch (Exception ex)
-        {
-            if (collector is not null && collector.Telemetry.Error is null) collector.Telemetry.Error = ex.Message;
-            throw;
-        }
+        logger?.LogInformation("Agent run {RunId} model round starting.", context.RunId);
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public override async Task<AiToolResultContent> InvokeToolAsync(
-        AgentRunContext context, AiToolCallContent call, AgentToolInvokeDelegate next)
+    public override Task<AiMessage> OnAfterAgentResponseAsync(
+        AgentRunContext context, AiMessage response, AgentResponseUsage? usage,
+        CancellationToken cancellationToken = default)
     {
         var collector = GetCollector(context);
-        var stopwatch = collector is null ? null : Stopwatch.StartNew();
-        AiToolResultContent result;
-        try
-        {
-            result = await next(context, call).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            if (collector is not null) collector.Telemetry.Cancelled = true;
-            throw;
-        }
-        catch (Exception ex)
-        {
-            stopwatch?.Stop();
-            collector?.ToolFinished(call.Name, stopwatch?.Elapsed ?? TimeSpan.Zero, isError: true);
-            logger?.LogError(ex, "Agent run {RunId} tool '{ToolName}' threw after {Duration} ms.",
-                context.RunId, call.Name, stopwatch?.ElapsedMilliseconds ?? 0);
-            throw;
-        }
+        collector?.ModelRoundFinished(usage);
 
-        stopwatch?.Stop();
-        collector?.ToolFinished(call.Name, stopwatch?.Elapsed ?? TimeSpan.Zero, result.IsError);
-        var durationMs = stopwatch?.ElapsedMilliseconds ?? 0;
+        logger?.LogInformation(
+            "Agent run {RunId} model round {Round} completed (input: {InputTokens} tokens, cached: {CachedTokens} tokens, output: {OutputTokens} tokens, reasoning: {ReasoningTokens} tokens).",
+            context.RunId, collector?.Telemetry.ModelRounds, usage?.InputTokens,
+            usage?.CachedInputTokens, usage?.OutputTokens, usage?.ReasoningOutputTokens);
+        return Task.FromResult(response);
+    }
+
+    /// <inheritdoc />
+    public override Task<AiToolResultContent> OnAfterToolCallAsync(
+        AgentRunContext context, AiToolCallContent call, AiToolResultContent result,
+        CancellationToken cancellationToken = default)
+    {
+        var collector = GetCollector(context);
+        collector?.ToolFinished(call.Name, result.IsError);
         if (result.IsError)
-            logger?.LogWarning("Agent run {RunId} tool '{ToolName}' failed in {Duration} ms: {Error}",
-                context.RunId, call.Name, durationMs, result.Result);
+            logger?.LogWarning("Agent run {RunId} tool '{ToolName}' failed: {Error}",
+                context.RunId, call.Name, result.Result);
         else
-            logger?.LogInformation("Agent run {RunId} tool '{ToolName}' completed in {Duration} ms.",
-                context.RunId, call.Name, durationMs);
-        return result;
+            logger?.LogInformation("Agent run {RunId} tool '{ToolName}' completed.",
+                context.RunId, call.Name);
+        return Task.FromResult(result);
     }
 
     /// <inheritdoc />
@@ -146,29 +117,24 @@ public sealed class AgentTelemetryMiddleware(
     {
         public AgentRunTelemetry Telemetry { get; } = telemetry;
 
-        public Stopwatch ModelStopwatch { get; } = new();
-
-        public void ModelRoundFinished(AiUsageContent? usage)
+        public void ModelRoundFinished(AgentResponseUsage? usage)
         {
             Telemetry.ModelRounds++;
-            Telemetry.ModelDuration += ModelStopwatch.Elapsed;
             if (usage is null) return;
             Telemetry.InputTokens += usage.InputTokens;
             Telemetry.OutputTokens += usage.OutputTokens;
-            AgentTelemetryMeter.ModelCallDuration.Record(ModelStopwatch.Elapsed.TotalSeconds);
             if (usage.InputTokens > 0) AgentTelemetryMeter.InputTokens.Add(usage.InputTokens);
             if (usage.OutputTokens > 0) AgentTelemetryMeter.OutputTokens.Add(usage.OutputTokens);
+            if (usage.CachedInputTokens is > 0) AgentTelemetryMeter.CachedInputTokens.Add(usage.CachedInputTokens.Value);
         }
 
-        public void ToolFinished(string name, TimeSpan duration, bool isError)
+        public void ToolFinished(string name, bool isError)
         {
             Telemetry.ToolCalls++;
-            Telemetry.ToolDuration += duration;
             if (isError) Telemetry.ToolErrors++;
             AgentTelemetryMeter.ToolCalls.Add(1,
                 new KeyValuePair<string, object?>("tool_name", name),
                 new KeyValuePair<string, object?>("outcome", isError ? "error" : "ok"));
-            AgentTelemetryMeter.ToolCallDuration.Record(duration.TotalSeconds);
         }
 
         public AgentRunTelemetry Finish()

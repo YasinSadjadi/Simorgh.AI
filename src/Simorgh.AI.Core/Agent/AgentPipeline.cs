@@ -6,10 +6,10 @@ using Simorgh.AI.Abstractions.Messages;
 namespace Simorgh.AI.Core.Agent;
 
 /// <summary>
-///     Builds the nested middleware chain and exposes entry points for each pipeline point.
-///     Middleware execute in registration order on the way in, and reverse order on the way out.
+///     Runs the registered middleware in registration order, threading each stage's output
+///     through them so the agent service consumes the final value.
 /// </summary>
-/// <param name="middlewares">Middleware to wrap the execution chain with, in registration order.</param>
+/// <param name="middlewares">Middleware to execute, in registration order.</param>
 public sealed class AgentPipeline(IEnumerable<AgentMiddleware>? middlewares)
 {
     /// <summary>Middleware to execute, in registration order.</summary>
@@ -27,32 +27,68 @@ public sealed class AgentPipeline(IEnumerable<AgentMiddleware>? middlewares)
         return RunSequentially(m => m.OnEndAsync(context, cancellationToken), cancellationToken);
     }
 
-    /// <summary>Runs one agent round through the middleware chain into <paramref name="terminal" />.</summary>
-    public Task<AiMessage> InvokeResponseAsync(AgentRunContext context, AgentResponseDelegate terminal)
+    /// <summary>
+    ///     Runs <see cref="AgentMiddleware.OnBeforeAgentResponseAsync" /> on every middleware,
+    ///     in registration order, before the model call.
+    /// </summary>
+    public Task OnBeforeAgentResponseAsync(AgentRunContext context, CancellationToken cancellationToken)
     {
-        for (var i = Middlewares.Count - 1; i >= 0; i--)
-        {
-            var middleware = Middlewares[i];
-            var next = terminal;
-            terminal = ctx => middleware.InvokeResponseAsync(ctx, next);
-        }
-
-        return terminal(context);
+        return RunSequentially(
+            m => m.OnBeforeAgentResponseAsync(context, cancellationToken), cancellationToken);
     }
 
-    /// <summary>Runs one tool invocation through the middleware chain into <paramref name="terminal" />.</summary>
-    public Task<AiToolResultContent> InvokeToolAsync(
-        AgentRunContext context, AiToolCallContent call, AgentToolInvokeDelegate terminal)
+    /// <summary>
+    ///     Passes the model response and its usage through
+    ///     <see cref="AgentMiddleware.OnAfterAgentResponseAsync" /> on every middleware, in
+    ///     registration order, and returns the final response.
+    /// </summary>
+    public async Task<AiMessage> OnAfterAgentResponseAsync(
+        AgentRunContext context, AiMessage response, AgentResponseUsage? usage,
+        CancellationToken cancellationToken)
     {
-        var chain = terminal;
-        for (var i = Middlewares.Count - 1; i >= 0; i--)
+        foreach (var middleware in Middlewares)
         {
-            var middleware = Middlewares[i];
-            var next = chain;
-            chain = (ctx, c) => middleware.InvokeToolAsync(ctx, c, next);
+            cancellationToken.ThrowIfCancellationRequested();
+            response = await middleware.OnAfterAgentResponseAsync(context, response, usage, cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        return chain(context, call);
+        return response;
+    }
+
+    /// <summary>
+    ///     Passes the tool call through <see cref="AgentMiddleware.OnBeforeToolCallAsync" /> on every
+    ///     middleware, in registration order, and returns the call to execute.
+    /// </summary>
+    public async Task<AiToolCallContent> OnBeforeToolCallAsync(
+        AgentRunContext context, AiToolCallContent call, CancellationToken cancellationToken)
+    {
+        foreach (var middleware in Middlewares)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            call = await middleware.OnBeforeToolCallAsync(context, call, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return call;
+    }
+
+    /// <summary>
+    ///     Passes the tool result through <see cref="AgentMiddleware.OnAfterToolCallAsync" /> on every
+    ///     middleware, in registration order, and returns the final result.
+    /// </summary>
+    public async Task<AiToolResultContent> OnAfterToolCallAsync(
+        AgentRunContext context, AiToolCallContent call, AiToolResultContent result,
+        CancellationToken cancellationToken)
+    {
+        foreach (var middleware in Middlewares)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            result = await middleware.OnAfterToolCallAsync(context, call, result, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return result;
     }
 
     private async Task RunSequentially(

@@ -3,18 +3,10 @@ using Simorgh.AI.Abstractions.Messages;
 
 namespace Simorgh.AI.Abstractions.Agent.Middleware;
 
-/// <summary>Executes a round of the agent (the model call) and returns its response.</summary>
-public delegate Task<AiMessage> AgentResponseDelegate(AgentRunContext context);
-
-/// <summary>Executes a tool invocation and returns its result.</summary>
-public delegate Task<AiToolResultContent> AgentToolInvokeDelegate(
-    AgentRunContext context, AiToolCallContent call);
-
 /// <summary>
-///     Extends agent execution by wrapping the call chain. Each middleware receives the next
-///     stage in <see cref="InvokeResponseAsync" />/<see cref="InvokeToolAsync" /> and decides
-///     whether to adjust the input, call it, short-circuit it, or adjust its output.
-///     Middleware execute in registration order on the way in, and reverse order on the way out.
+///     Extends agent execution. Each middleware receives the output of a stage (the model
+///     response, a tool result) as an input parameter and returns what the agent service
+///     should use from that point on. Middleware execute in registration order.
 /// </summary>
 public abstract class AgentMiddleware : IDisposable
 {
@@ -30,65 +22,47 @@ public abstract class AgentMiddleware : IDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>Called before each round; may adjust <see cref="AgentRunContext.Messages" />.</summary>
-    protected virtual Task BeforeResponseAsync(
+    /// <summary>
+    ///     Called before each model round; may adjust <see cref="AgentRunContext.Messages" />
+    ///     ahead of the model call.
+    /// </summary>
+    public virtual Task OnBeforeAgentResponseAsync(
         AgentRunContext context, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
-    /// <summary>Called after each round; return the response to pass on, replaced if desired.</summary>
-    protected virtual Task<AiMessage> AfterResponseAsync(
-        AgentRunContext context, AiMessage response, CancellationToken cancellationToken = default)
+    /// <summary>
+    ///     Called after each model round with the response the model produced and the usage it
+    ///     reported (<see cref="AgentResponseUsage" />, <c>null</c> when the provider reports none);
+    ///     return the response the agent service should use instead.
+    /// </summary>
+    public virtual Task<AiMessage> OnAfterAgentResponseAsync(
+        AgentRunContext context, AiMessage response, AgentResponseUsage? usage,
+        CancellationToken cancellationToken = default)
     {
         return Task.FromResult(response);
     }
 
-    /// <summary>Called before a tool invocation; return the call that should run.</summary>
-    protected virtual Task<AiToolCallContent> BeforeToolCallAsync(
+    /// <summary>
+    ///     Called before each tool invocation with the call the model issued; return the
+    ///     call the agent service should execute instead.
+    /// </summary>
+    public virtual Task<AiToolCallContent> OnBeforeToolCallAsync(
         AgentRunContext context, AiToolCallContent call, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(call);
     }
 
-    /// <summary>Called after a tool invocation; return the result to feed back to the model.</summary>
-    protected virtual Task<AiToolResultContent> AfterToolCallAsync(
+    /// <summary>
+    ///     Called after each tool invocation with the result the tool produced; return the
+    ///     result the agent service should feed back to the model instead.
+    /// </summary>
+    public virtual Task<AiToolResultContent> OnAfterToolCallAsync(
         AgentRunContext context, AiToolCallContent call, AiToolResultContent result,
         CancellationToken cancellationToken = default)
     {
         return Task.FromResult(result);
-    }
-
-    /// <summary>
-    ///     Wraps one round of the agent. The default implementation runs
-    ///     <see cref="BeforeResponseAsync" />, then <paramref name="next" />, then
-    ///     <see cref="AfterResponseAsync" />. Override it to take full control of the chain
-    ///     (modify <paramref name="context" />, short-circuit by skipping <paramref name="next" />,
-    ///     call it more than once) while still delegating to the hooks if desired.
-    /// </summary>
-    public virtual async Task<AiMessage> InvokeResponseAsync(
-        AgentRunContext context, AgentResponseDelegate next)
-    {
-        await BeforeResponseAsync(context, context.CancellationToken).ConfigureAwait(false);
-        var response = await next(context).ConfigureAwait(false);
-        return await AfterResponseAsync(context, response, context.CancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    ///     Wraps one tool invocation. The default implementation runs
-    ///     <see cref="BeforeToolCallAsync" />, then <paramref name="next" />, then
-    ///     <see cref="AfterToolCallAsync" />. Override it to replace the <paramref name="call" />,
-    ///     skip <paramref name="next" /> by producing a result themselves, or call it more than
-    ///     once, while still delegating to the hooks if desired.
-    /// </summary>
-    public virtual async Task<AiToolResultContent> InvokeToolAsync(
-        AgentRunContext context, AiToolCallContent call, AgentToolInvokeDelegate next)
-    {
-        var effectiveCall = await BeforeToolCallAsync(context, call, context.CancellationToken)
-            .ConfigureAwait(false);
-        var result = await next(context, effectiveCall).ConfigureAwait(false);
-        return await AfterToolCallAsync(context, effectiveCall, result, context.CancellationToken)
-            .ConfigureAwait(false);
     }
 
     /// <summary>Called once when the run ends, whether it succeeded, failed, or was cancelled.</summary>

@@ -49,4 +49,9 @@ public static class AgentTelemetryMeter
     /// <summary>Output tokens produced.</summary>
     public static readonly Counter<long> OutputTokens = Meter.CreateCounter<long>(
         "simorgh.agent.tokens.output", unit: TokenUnit, description: "Output tokens produced by agent runs.");
+
+    /// <summary>Input tokens served from the provider's cache.</summary>
+    public static readonly Counter<long> CachedInputTokens = Meter.CreateCounter<long>(
+        "simorgh.agent.tokens.input.cached", unit: TokenUnit,
+        description: "Input tokens served from the provider's cache.");
 }

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Simorgh.AI.Abstractions.Agent;
 using Simorgh.AI.Abstractions.Agent.Cancellation;
+using Simorgh.AI.Abstractions.Agent.Middleware;
 using Simorgh.AI.Abstractions.Contents;
 using Simorgh.AI.Abstractions.Messages;
 using Simorgh.AI.Abstractions.Tools;
@@ -124,9 +125,9 @@ internal sealed class AgentRun : IAgentRun
                 var declarations = await toolCallingStrategy.GetToolDeclarationsAsync(
                     availableTools, context, round, runToken).ConfigureAwait(false);
 
-                reply = await pipeline.InvokeResponseAsync(
-                    context, ctx => CallModelAsync(chatClient, declarations, ctx, request.Stream))
-                    .ConfigureAwait(false);
+                await pipeline.OnBeforeAgentResponseAsync(context, runToken).ConfigureAwait(false);
+                reply = await RunModelRoundAsync(
+                    chatClient, declarations, context, request.Stream, pipeline).ConfigureAwait(false);
                 context.Messages.Add(reply);
 
                 var calls = reply.Contents.OfType<AiToolCallContent>().ToList();
@@ -140,8 +141,15 @@ internal sealed class AgentRun : IAgentRun
 
                 var followUpMessages = await toolCallingStrategy.InvokeToolsAsync(
                     context, calls,
-                    (call, ct) => pipeline.InvokeToolAsync(
-                        context, call, (ctx, c) => ExecuteToolAsync(tools, ctx, c)),
+                    async (call, ct) =>
+                    {
+                        var effectiveCall = await pipeline.OnBeforeToolCallAsync(context, call, ct)
+                            .ConfigureAwait(false);
+                        var result = await ExecuteToolAsync(tools, context, effectiveCall)
+                            .ConfigureAwait(false);
+                        return await pipeline.OnAfterToolCallAsync(context, effectiveCall, result, ct)
+                            .ConfigureAwait(false);
+                    },
                     runToken).ConfigureAwait(false);
 
                 foreach (var message in followUpMessages)
@@ -176,7 +184,52 @@ internal sealed class AgentRun : IAgentRun
         }
     }
 
-    /// <summary>Terminal stage of the response chain: the actual model call.</summary>
+    /// <summary>
+    ///     Runs one model round and passes its output through
+    ///     <see cref="AgentPipeline.OnAfterAgentResponseAsync" />. The after hook always runs —
+    ///     even when the model call throws or is cancelled — with the partial message and
+    ///     whatever usage arrived up to that point (streaming providers report usage in
+    ///     updates, so it can be available even without a completed response). The original
+    ///     exception is rethrown afterwards.
+    /// </summary>
+    private async Task<AiMessage> RunModelRoundAsync(
+        IChatClient chatClient,
+        IReadOnlyList<AiToolDeclaration> declarations,
+        AgentRunContext context,
+        bool stream,
+        AgentPipeline pipeline)
+    {
+        var contents = new List<AIContent>();
+        AiMessage response;
+        try
+        {
+            response = await CallModelAsync(chatClient, declarations, context, stream, contents)
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // The run token may already be cancelled; the hook must still run, so no token here.
+            var partial = ToPartialMessage(contents);
+            await pipeline.OnAfterAgentResponseAsync(
+                context, partial, AgentResponseUsage.FromMessage(partial), CancellationToken.None)
+                .ConfigureAwait(false);
+            throw;
+        }
+
+        return await pipeline.OnAfterAgentResponseAsync(
+            context, response, AgentResponseUsage.FromMessage(response), context.CancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Builds a message from whatever content arrived before a failed stream ended.</summary>
+    private static AiMessage ToPartialMessage(List<AIContent> contents)
+    {
+        return contents.Count == 0
+            ? AiMessage.FromText(AiMessageRole.Agent, string.Empty)
+            : AiMessageMapper.ToAiMessage(contents);
+    }
+
+    /// <summary>The actual model call.</summary>
     /// <param name="stream">
     ///     When <c>true</c>, the response is streamed and each text delta is raised as an
     ///     <see cref="AgentStreamUpdate" /> while it is produced.
@@ -184,9 +237,13 @@ internal sealed class AgentRun : IAgentRun
     /// <param name="chatClient">Client used to perform the model call.</param>
     /// <param name="declarations">Tool declarations exposed to the model, possibly empty.</param>
     /// <param name="context">Context of the run the call belongs to.</param>
+    /// <param name="contents">
+    ///     Collects every content received while streaming, so usage that already arrived is
+    ///     not lost when the stream fails or is cancelled partway.
+    /// </param>
     private async Task<AiMessage> CallModelAsync(
         IChatClient chatClient, IReadOnlyList<AiToolDeclaration> declarations, AgentRunContext context,
-        bool stream)
+        bool stream, List<AIContent> contents)
     {
         var chatMessages = context.Messages.Select(AiMessageMapper.ToChatMessage).ToList();
         var options = declarations.Count > 0
@@ -201,7 +258,6 @@ internal sealed class AgentRun : IAgentRun
             return AiMessageMapper.ToAiMessage(response);
         }
 
-        var contents = new List<AIContent>();
         await foreach (var update in chatClient
                            .GetStreamingResponseAsync(chatMessages, options, context.CancellationToken)
                            .ConfigureAwait(false))
