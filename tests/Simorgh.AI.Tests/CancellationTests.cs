@@ -11,7 +11,7 @@ public class AgentCancellationTests
 {
     private static AgentService CreateAgent(IChatClient chatClient, IAgentRunRegistry? registry = null)
     {
-        return AgentService.Initialize(chatClient, new NoToolsStrategy(), runRegistry: registry);
+        return AgentService.Initialize(chatClient, new NoToolsStrategy(), new AgentServiceOptions { RunRegistry = registry });
     }
 
     private static AgentRunRequest StreamingRequest()

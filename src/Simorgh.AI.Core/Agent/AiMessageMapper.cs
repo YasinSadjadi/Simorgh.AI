@@ -18,21 +18,35 @@ public static class AiMessageMapper
         return new ChatMessage(ToChatRole(message.Role), contents);
     }
 
-    /// <summary>Converts a provider response into a Simorgh.AI agent message.</summary>
-    public static AiMessage ToAiMessage(ChatResponse response)
+    /// <summary>
+    ///     Converts a provider response into a Simorgh.AI agent message. Usage and finish
+    ///     reason are lifted onto <see cref="AiResponse" /> as response metadata, not
+    ///     message content.
+    /// </summary>
+    public static AiResponse ToAiResponse(ChatResponse response)
     {
-        return ToAiMessage(response.Messages.SelectMany(m => m.Contents).ToList());
+        var contents = response.Messages.SelectMany(m => m.Contents).ToList();
+        var usage = response.Usage is not null
+            ? ToAiUsage(response.Usage)
+            : ExtractUsage(contents);
+        return ToAiResponse(contents, usage, response.FinishReason?.ToString());
     }
 
     /// <summary>
     ///     Converts accumulated contents (e.g. gathered from a streamed response) into a
     ///     Simorgh.AI agent message, merging consecutive text parts into a single
-    ///     <see cref="AiTextContent" />.
+    ///     <see cref="AiTextContent" />. Any <see cref="UsageContent" /> is lifted onto
+    ///     <see cref="AiResponse.Usage" /> as response metadata, not message content.
     /// </summary>
-    public static AiMessage ToAiMessage(IReadOnlyList<AIContent> contents)
+    public static AiResponse ToAiResponse(IReadOnlyList<AIContent> contents, string? finishReason = null)
+    {
+        return ToAiResponse(contents, ExtractUsage(contents), finishReason);
+    }
+
+    private static AiResponse ToAiResponse(IReadOnlyList<AIContent> contents, AiUsage? usage, string? finishReason)
     {
         var mapped = new List<AiContent>();
-        foreach (var content in contents.Select(ToAiContent))
+        foreach (var content in contents.Where(c => c is not UsageContent).Select(ToAiContent))
         {
             if (content is AiTextContent text &&
                 mapped.Count > 0 && mapped[mapped.Count - 1] is AiTextContent previous)
@@ -41,7 +55,33 @@ public static class AiMessageMapper
                 mapped.Add(content);
         }
 
-        return new AiMessage(AiMessageRole.Agent, mapped);
+        return new AiResponse(new AiMessage(AiMessageRole.Agent, mapped), usage, finishReason);
+    }
+
+    /// <summary>Lifts the last reported <see cref="UsageContent" /> out of streamed contents.</summary>
+    private static AiUsage? ExtractUsage(IReadOnlyList<AIContent> contents)
+    {
+        var usage = contents.OfType<UsageContent>().LastOrDefault();
+        return usage is null ? null : ToAiUsage(usage.Details);
+    }
+
+    private static AiUsage ToAiUsage(UsageDetails details)
+    {
+        var inputDetails = new Dictionary<string, long>();
+        AddDetail(inputDetails, "cached", details.CachedInputTokenCount);
+        AddDetail(inputDetails, "text", details.InputTextTokenCount);
+        AddDetail(inputDetails, "audio", details.InputAudioTokenCount);
+
+        var outputDetails = new Dictionary<string, long>();
+        AddDetail(outputDetails, "reasoning", details.ReasoningTokenCount);
+        AddDetail(outputDetails, "text", details.OutputTextTokenCount);
+        AddDetail(outputDetails, "audio", details.OutputAudioTokenCount);
+
+        return new AiUsage(
+            details.InputTokenCount ?? 0,
+            details.OutputTokenCount ?? 0,
+            inputDetails.Count == 0 ? null : inputDetails,
+            outputDetails.Count == 0 ? null : outputDetails);
     }
 
     private static ChatRole ToChatRole(AiMessageRole role)
@@ -73,8 +113,6 @@ public static class AiMessageMapper
                 result.CallId,
                 result.Result),
             AiThinkingContent thinking => new TextContent(thinking.Text),
-            AiUsageContent => throw new NotSupportedException(
-                "Usage is reported by the provider, not sent as input content."),
             AiErrorContent => throw new NotSupportedException(
                 "Errors are not sent to the provider as input content."),
             _ => throw new NotSupportedException($"Content type '{content.GetType()}' is not supported.")
@@ -103,7 +141,6 @@ public static class AiMessageMapper
             FunctionResultContent result => new AiToolResultContent(
                 result.CallId,
                 result.Result is null ? string.Empty : JsonSerializer.Serialize(result.Result)),
-            UsageContent usage => ToAiUsageContent(usage),
             ErrorContent error => new AiErrorContent(error.Message, error.ErrorCode),
             DataContent data => DataToAiMediaContent(data),
             UriContent uri => new AiFileContent(uri.MediaType ?? "application/octet-stream", url: uri.Uri),
@@ -111,30 +148,8 @@ public static class AiMessageMapper
         };
     }
 
-    private static AiContent ToAiUsageContent(UsageContent usage)
-    {
-        var input = usage.Details.InputTokenCount ?? 0;
-        var output = usage.Details.OutputTokenCount ?? 0;
-
-        var inputDetails = new Dictionary<string, long>();
-        AddDetail(inputDetails, "cached", usage.Details.CachedInputTokenCount);
-        AddDetail(inputDetails, "text", usage.Details.InputTextTokenCount);
-        AddDetail(inputDetails, "audio", usage.Details.InputAudioTokenCount);
-
-        var outputDetails = new Dictionary<string, long>();
-        AddDetail(outputDetails, "reasoning", usage.Details.ReasoningTokenCount);
-        AddDetail(outputDetails, "text", usage.Details.OutputTextTokenCount);
-        AddDetail(outputDetails, "audio", usage.Details.OutputAudioTokenCount);
-
-        return new AiUsageContent(
-            input,
-            output,
-            inputDetails.Count == 0 ? null : inputDetails,
-            outputDetails.Count == 0 ? null : outputDetails);
-    }
-
     private static void AddDetail(Dictionary<string, long> details, string name, long? count)
-    {
+        {
         if (count.HasValue) details[name] = count.Value;
     }
 

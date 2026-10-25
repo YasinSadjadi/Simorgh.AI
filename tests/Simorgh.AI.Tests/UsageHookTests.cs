@@ -81,7 +81,7 @@ public class AgentUsageHookTests
     {
         var middleware = new RecordingUsageMiddleware();
         var agent = AgentService.Initialize(
-            new FailingAfterUsageChatClient(), new NoToolsStrategy(), middlewares: [middleware]);
+            new FailingAfterUsageChatClient(), new NoToolsStrategy(), new AgentServiceOptions { Middlewares = [middleware] });
 
         var run = agent.Submit(
             new AgentRunRequest([AiMessage.FromText(AiMessageRole.User, "hello")], stream: true));
@@ -98,7 +98,7 @@ public class AgentUsageHookTests
     {
         var middleware = new RecordingUsageMiddleware();
         var agent = AgentService.Initialize(
-            new FailingAfterUsageChatClient(), new NoToolsStrategy(), middlewares: [middleware]);
+            new FailingAfterUsageChatClient(), new NoToolsStrategy(), new AgentServiceOptions { Middlewares = [middleware] });
 
         var run = agent.Submit(
             new AgentRunRequest([AiMessage.FromText(AiMessageRole.User, "hello")], stream: false));

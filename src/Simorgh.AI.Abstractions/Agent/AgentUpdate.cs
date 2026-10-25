@@ -32,13 +32,16 @@ public sealed class AgentMessageUpdate(string runId, AiMessage message) : AgentU
     public AiMessage Message { get; } = message;
 }
 
-/// <summary>The run finished successfully; <see cref="Message" /> is the agent's final answer.</summary>
+/// <summary>
+///     The run finished successfully; <see cref="Response.Message" /> is the agent's final
+///     answer, with the usage and finish reason the provider reported for it.
+/// </summary>
 /// <param name="runId">Id of the run that has completed.</param>
-/// <param name="message">The agent's final answer.</param>
-public sealed class AgentRunCompletedUpdate(string runId, AiMessage message) : AgentUpdate(runId)
+/// <param name="response">The agent's final answer with its response metadata.</param>
+public sealed class AgentRunCompletedUpdate(string runId, AiResponse response) : AgentUpdate(runId)
 {
-    /// <summary>The agent's final answer.</summary>
-    public AiMessage Message { get; } = message;
+    /// <summary>The agent's final answer with its response metadata.</summary>
+    public AiResponse Response { get; } = response;
 }
 
 /// <summary>The run was cancelled before it could finish.</summary>

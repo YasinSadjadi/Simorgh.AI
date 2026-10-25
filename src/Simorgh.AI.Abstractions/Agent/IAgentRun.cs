@@ -12,9 +12,10 @@ public interface IAgentRun
     string RunId { get; }
 
     /// <summary>
-    ///     Completes with the agent's final answer, or faults with the failure that ended the run.
+    ///     Completes with the agent's final answer and its response metadata (usage, finish
+    ///     reason), or faults with the failure that ended the run.
     /// </summary>
-    Task<AiMessage> Completion { get; }
+    Task<AiResponse> Completion { get; }
 
     /// <summary>Raised for every <see cref="AgentUpdate" /> produced by the run, on an unspecified thread.</summary>
     event Action<AgentUpdate>? Updated;

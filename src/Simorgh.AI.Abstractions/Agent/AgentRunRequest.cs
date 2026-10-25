@@ -15,11 +15,15 @@ namespace Simorgh.AI.Abstractions.Agent;
 ///     Optional caller-supplied run id. When omitted, a unique id is generated; when provided,
 ///     it is used as-is so the caller can track or cancel the run with its own identifier.
 /// </param>
+/// <param name="maxOutputTokens">
+///     Optional cap on the tokens the model may produce per response, enforced by the provider.
+/// </param>
 public sealed class AgentRunRequest(
     IList<AiMessage> messages,
     IReadOnlyDictionary<string, object?>? properties = null,
     bool stream = false,
-    string? runId = null)
+    string? runId = null,
+    int? maxOutputTokens = null)
 {
     /// <summary>The conversation so far, including the new user input as the last message.</summary>
     public IList<AiMessage> Messages { get; } = messages;
@@ -39,4 +43,10 @@ public sealed class AgentRunRequest(
     ///     Used as-is when present, so the caller can track or cancel the run with its own identifier.
     /// </summary>
     public string? RunId { get; } = string.IsNullOrWhiteSpace(runId) ? null : runId;
+
+    /// <summary>
+    ///     Optional cap on the tokens the model may produce per response, enforced by the
+    ///     provider. When <c>null</c>, the provider's default applies.
+    /// </summary>
+    public int? MaxOutputTokens { get; } = maxOutputTokens;
 }

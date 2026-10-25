@@ -19,45 +19,29 @@ namespace Simorgh.AI.Core.Agent;
 public sealed class AgentService(
     IChatClient chatClient,
     IToolCallingStrategy toolCallingStrategy,
-    ToolRegistry? tools = null,
-    IEnumerable<AgentMiddleware>? middlewares = null,
-    string? instructions = null,
-    IAgentRunRegistry? runRegistry = null)
+    AgentServiceOptions? options = null)
     : IAgentService
 {
     private readonly IChatClient _chatClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
-    private readonly AgentPipeline _pipeline = new(middlewares);
+    private readonly AgentServiceOptions _options = options ?? new AgentServiceOptions();
+
+    private readonly AgentPipeline _pipeline = new((options ?? new AgentServiceOptions()).Middlewares);
 
     private readonly IToolCallingStrategy _toolCallingStrategy =
         toolCallingStrategy ?? throw new ArgumentNullException(nameof(toolCallingStrategy));
-
-    private readonly IAgentRunRegistry? _runRegistry = runRegistry;
 
     /// <summary>
     ///     Creates an agent service with the given tool-calling strategy.
     ///     No DI container is required.
     /// </summary>
-    /// <param name="middlewares">Optional middleware hooks around the run.</param>
-    /// <param name="instructions">
-    ///     Optional system instructions that shape the agent's behavior; sent as the
-    ///     system message at the start of every run.
-    /// </param>
-    /// <param name="runRegistry">
-    ///     Optional registry through which submitted runs can be cancelled by id,
-    ///     including from other servers in a multi-server deployment.
-    /// </param>
     public static AgentService Initialize(
         IChatClient chatClient,
         IToolCallingStrategy toolCallingStrategy,
-        ToolRegistry? tools = null,
-        IEnumerable<AgentMiddleware>? middlewares = null,
-        string? instructions = null,
-        IAgentRunRegistry? runRegistry = null)
+        AgentServiceOptions? options = null)
     {
         if (chatClient is null) throw new ArgumentNullException(nameof(chatClient));
-        return toolCallingStrategy is null
-            ? throw new ArgumentNullException(nameof(toolCallingStrategy))
-            : new AgentService(chatClient, toolCallingStrategy, tools, middlewares, instructions, runRegistry);
+        if (toolCallingStrategy is null) throw new ArgumentNullException(nameof(toolCallingStrategy));
+        return new AgentService(chatClient, toolCallingStrategy, options);
     }
 
     /// <inheritdoc />
@@ -65,13 +49,21 @@ public sealed class AgentService(
     {
         return strategy is null
             ? throw new ArgumentNullException(nameof(strategy))
-            : new AgentService(_chatClient, strategy, tools, _pipeline.Middlewares, instructions, _runRegistry);
+            : new AgentService(_chatClient, strategy, _options);
     }
 
     /// <inheritdoc />
     public IAgentService WithInstructions(string? instructions)
     {
-        return new AgentService(_chatClient, _toolCallingStrategy, tools, _pipeline.Middlewares, instructions, _runRegistry);
+        return new AgentService(
+            _chatClient, _toolCallingStrategy, new AgentServiceOptions
+            {
+                Tools = _options.Tools,
+                Middlewares = _pipeline.Middlewares,
+                Instructions = instructions,
+                RunRegistry = _options.RunRegistry,
+                ContextWindowTokens = _options.ContextWindowTokens
+            });
     }
 
     /// <inheritdoc />
@@ -79,11 +71,19 @@ public sealed class AgentService(
     {
         return runRegistry is null
             ? throw new ArgumentNullException(nameof(runRegistry))
-            : new AgentService(_chatClient, _toolCallingStrategy, tools, _pipeline.Middlewares, instructions, runRegistry);
+            : new AgentService(
+                _chatClient, _toolCallingStrategy, new AgentServiceOptions
+                {
+                    Tools = _options.Tools,
+                    Middlewares = _pipeline.Middlewares,
+                    Instructions = _options.Instructions,
+                    RunRegistry = runRegistry,
+                    ContextWindowTokens = _options.ContextWindowTokens
+                });
     }
 
     /// <inheritdoc />
-    public async Task<AiMessage> RunAsync(AgentRunRequest request, CancellationToken cancellationToken = default)
+    public async Task<AiResponse> RunAsync(AgentRunRequest request, CancellationToken cancellationToken = default)
     {
         var run = Submit(request, cancellationToken);
         try
@@ -97,12 +97,15 @@ public sealed class AgentService(
     }
 
     /// <inheritdoc />
-    public IAgentRun Submit(AgentRunRequest request, CancellationToken cancellationToken = default)
+    public IAgentRun Submit(
+        AgentRunRequest request,
+        CancellationToken cancellationToken = default,
+        Action<IAgentRun>? subscribe = null)
     {
         return request is null
             ? throw new ArgumentNullException(nameof(request))
             : AgentRun.Start(
-                _chatClient, tools, _toolCallingStrategy, _pipeline, instructions, request, cancellationToken,
-                _runRegistry);
+                _chatClient, _options.Tools, _toolCallingStrategy, _pipeline, _options.Instructions, request,
+                cancellationToken, _options.RunRegistry, subscribe, _options.ContextWindowTokens);
     }
 }

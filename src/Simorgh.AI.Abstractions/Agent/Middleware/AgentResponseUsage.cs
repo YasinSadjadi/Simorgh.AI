@@ -1,4 +1,3 @@
-using Simorgh.AI.Abstractions.Contents;
 using Simorgh.AI.Abstractions.Messages;
 
 namespace Simorgh.AI.Abstractions.Agent.Middleware;
@@ -36,18 +35,18 @@ public sealed class AgentResponseUsage(
     /// <summary>Detail per output modality (text, audio, ...), when the provider reports it.</summary>
     public IReadOnlyDictionary<string, long>? OutputTokenDetails { get; } = outputTokenDetails;
 
-    /// <summary>Extracts usage from the <see cref="AiUsageContent" /> carried by a response, if any.</summary>
-    public static AgentResponseUsage? FromMessage(AiMessage response)
+    /// <summary>Extracts the usage reported for a response (<see cref="AiResponse.Usage" />), when any.</summary>
+    public static AgentResponseUsage? FromResponse(AiResponse response)
     {
-        var content = response.Contents.OfType<AiUsageContent>().FirstOrDefault();
-        if (content is null) return null;
+        var usage = response.Usage;
+        if (usage is null) return null;
 
         return new AgentResponseUsage(
-            content.InputTokens,
-            content.OutputTokens,
-            content.InputTokenDetails?.TryGetValue("cached", out var cached) == true ? cached : null,
-            content.OutputTokenDetails?.TryGetValue("reasoning", out var reasoning) == true ? reasoning : null,
-            content.InputTokenDetails,
-            content.OutputTokenDetails);
+            usage.InputTokens,
+            usage.OutputTokens,
+            usage.InputTokenDetails?.TryGetValue("cached", out var cached) == true ? cached : null,
+            usage.OutputTokenDetails?.TryGetValue("reasoning", out var reasoning) == true ? reasoning : null,
+            usage.InputTokenDetails,
+            usage.OutputTokenDetails);
     }
 }
