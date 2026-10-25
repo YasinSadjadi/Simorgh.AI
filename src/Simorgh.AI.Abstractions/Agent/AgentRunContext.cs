@@ -13,6 +13,8 @@ public sealed class AgentRunContext(
     IList<AiMessage> messages,
     CancellationToken cancellationToken = default)
 {
+    private readonly List<AgentRunWarning> _warnings = [];
+
     /// <summary>Unique id of the run.</summary>
     public string RunId { get; } = runId;
 
@@ -27,6 +29,29 @@ public sealed class AgentRunContext(
 
     /// <summary>Values produced or consumed by middleware during the run.</summary>
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+
+    /// <summary>Every warning reported during the run, in the order they occurred.</summary>
+    public IReadOnlyList<AgentRunWarning> Warnings => _warnings;
+
+    /// <summary>Raised for every warning reported through <see cref="ReportWarning" />.</summary>
+    public event Action<AgentRunWarning>? WarningReported;
+
+    /// <summary>
+    ///     Reports a non-fatal problem: it is recorded on <see cref="Warnings" />,
+    ///     <see cref="WarningReported" /> fires, and the agent service surfaces it to run
+    ///     consumers as an <see cref="AgentRunWarningUpdate" />. Middleware may call this
+    ///     directly instead of throwing; the pipeline also uses it whenever a middleware
+    ///     fails without asking to break the run.
+    /// </summary>
+    /// <param name="source">What produced the warning, e.g. the middleware type name.</param>
+    /// <param name="message">Human-readable description of the problem.</param>
+    /// <param name="error">The underlying exception, when any.</param>
+    public void ReportWarning(string source, string message, Exception? error = null)
+    {
+        var warning = new AgentRunWarning(source, message, error);
+        _warnings.Add(warning);
+        WarningReported?.Invoke(warning);
+    }
 
     /// <summary>
     ///     Total token capacity of the model's context window, when known. Set it (e.g.

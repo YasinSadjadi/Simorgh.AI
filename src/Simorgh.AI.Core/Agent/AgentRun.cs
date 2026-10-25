@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Simorgh.AI.Abstractions.Agent;
@@ -116,6 +117,8 @@ internal sealed class AgentRun : IAgentRun
         _cancellationSource = cancellationSource;
         var runToken = cancellationSource.Token;
         var context = new AgentRunContext(RunId, messages, runToken);
+        // Middleware failures that do not break the run surface to consumers as warnings.
+        context.WarningReported += warning => Raise(new AgentRunWarningUpdate(RunId, warning));
         // Only a window the developer explicitly supplied is used; without it no
         // percentage is computed. OnStartupAsync middleware may still set or override it.
         context.ContextWindowTokens = contextWindowTokens;
@@ -130,6 +133,7 @@ internal sealed class AgentRun : IAgentRun
             .ToList() as IReadOnlyList<AiToolDeclaration> ?? [];
 
         Raise(new AgentRunStartedUpdate(RunId));
+        AgentRunEnd? end = null;
         try
         {
             await pipeline.OnStartupAsync(context, runToken).ConfigureAwait(false);
@@ -160,15 +164,7 @@ internal sealed class AgentRun : IAgentRun
 
                 var followUpMessages = await toolCallingStrategy.InvokeToolsAsync(
                     context, calls,
-                    async (call, ct) =>
-                    {
-                        var effectiveCall = await pipeline.OnBeforeToolCallAsync(context, call, ct)
-                            .ConfigureAwait(false);
-                        var result = await ExecuteToolAsync(tools, context, effectiveCall)
-                            .ConfigureAwait(false);
-                        return await pipeline.OnAfterToolCallAsync(context, effectiveCall, result, ct)
-                            .ConfigureAwait(false);
-                    },
+                    (call, ct) => InvokeToolAsync(tools, pipeline, context, call, ct),
                     runToken).ConfigureAwait(false);
 
                 foreach (var message in followUpMessages)
@@ -178,38 +174,95 @@ internal sealed class AgentRun : IAgentRun
                 }
             }
 
+            end = new AgentRunEnd(AgentRunEndReason.Completed);
             Raise(new AgentRunCompletedUpdate(RunId, reply));
             _completion.TrySetResult(reply);
         }
-        catch (OperationCanceledException) when (_cancelRequested)
+        catch (OperationCanceledException ex) when (_cancelRequested)
         {
+            end = new AgentRunEnd(AgentRunEndReason.Cancelled, ex, _cancelReason);
             Raise(new AgentRunCancelledUpdate(RunId, _cancelReason));
             _completion.TrySetCanceled(runToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            end = new AgentRunEnd(AgentRunEndReason.Cancelled, ex);
             _completion.TrySetCanceled(cancellationToken);
         }
         catch (Exception ex)
         {
-            Raise(new AgentRunFailedUpdate(RunId, ex.Message));
-            _completion.TrySetException(new AgentRunException(ex.Message, ex));
+            // A middleware's failing result arrives wrapped; unwrap it so consumers see
+            // the middleware's own error.
+            var error = ex is MiddlewareFailedException { InnerException: { } inner } ? inner : ex;
+            end = new AgentRunEnd(AgentRunEndReason.Failed, error);
+            Raise(new AgentRunFailedUpdate(RunId, error.Message));
+            _completion.TrySetException(new AgentRunException(error.Message, error));
         }
         finally
         {
             registration?.Dispose();
             _cancellationSource = null;
-            await pipeline.OnEndAsync(context, CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await pipeline.OnEndAsync(context, end!, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // The completion is already settled and this execution is fire-and-forget,
+                // so an exception escaping here would go unobserved. Every middleware has
+                // already run; the pipeline rethrows their collected errors to this point.
+            }
         }
+    }
+
+    /// <summary>
+    ///     Runs the middleware tool chain around one tool invocation: the before hook, the
+    ///     tool itself, then — unconditionally — the after hook. Whatever happens in the
+    ///     first two steps (a middleware that throws, a tool that fails, cancellation), the
+    ///     after hook still runs with the exception so middleware can observe it and, by
+    ///     default, turn it into an error result for the model. Cancellation is rethrown
+    ///     after the hook so the run still ends as cancelled.
+    /// </summary>
+    private static async Task<AiToolResultContent> InvokeToolAsync(
+        ToolRegistry? tools, AgentPipeline pipeline, AgentRunContext context, AiToolCallContent call,
+        CancellationToken cancellationToken)
+    {
+        var effectiveCall = call;
+        AiToolResultContent? result = null;
+        Exception? error = null;
+        try
+        {
+            effectiveCall = await pipeline.OnBeforeToolCallAsync(context, call, cancellationToken)
+                .ConfigureAwait(false);
+            result = await ExecuteToolAsync(tools, context, effectiveCall).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            error = ex;
+        }
+
+        var finalResult = await pipeline.OnAfterToolCallAsync(
+            context, effectiveCall, result, error, CancellationToken.None).ConfigureAwait(false);
+
+        // Cancellation ends the run as cancelled; a middleware's failing result breaks the
+        // run and ends it as failed. Both propagate only after the after hook has run.
+        if (error is OperationCanceledException or MiddlewareFailedException)
+            ExceptionDispatchInfo.Capture(error).Throw();
+
+        return finalResult ?? new AiToolResultContent(
+            effectiveCall.CallId,
+            error?.Message ?? "The tool produced no result.",
+            isError: true);
     }
 
     /// <summary>
     ///     Runs one model round and passes its output through
     ///     <see cref="AgentPipeline.OnAfterAgentResponseAsync" />. The after hook always runs —
-    ///     even when the model call throws or is cancelled — with the partial message and
-    ///     whatever usage arrived up to that point (streaming providers report usage in
-    ///     updates, so it can be available even without a completed response). The original
-    ///     exception is rethrown afterwards.
+    ///     even when the model call throws or is cancelled — with the partial message, the
+    ///     exception itself, and whatever usage arrived up to that point (streaming providers
+    ///     report usage in updates, so it can be available even without a completed response).
+    ///     The original exception is rethrown afterwards; if the hook chain also fails, both
+    ///     errors are rethrown together.
     /// </summary>
     private async Task<AiResponse> RunModelRoundAsync(
         IChatClient chatClient,
@@ -226,18 +279,28 @@ internal sealed class AgentRun : IAgentRun
             response = await CallModelAsync(chatClient, declarations, context, stream, contents, maxOutputTokens)
                 .ConfigureAwait(false);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // The run token may already be cancelled; the hook must still run, so no token here.
             var partial = ToPartialResponse(contents);
-            await pipeline.OnAfterAgentResponseAsync(
-                context, partial.Message, AgentResponseUsage.FromResponse(partial), CancellationToken.None)
-                .ConfigureAwait(false);
+            try
+            {
+                await pipeline.OnAfterAgentResponseAsync(
+                    context, partial.Message, AgentResponseUsage.FromResponse(partial), ex, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception hookError)
+            {
+                throw new AggregateException(
+                    "The after-response middleware chain failed while handling a model error.",
+                    ex, hookError);
+            }
+
             throw;
         }
 
         var message = await pipeline.OnAfterAgentResponseAsync(
-            context, response.Message, AgentResponseUsage.FromResponse(response), context.CancellationToken)
+            context, response.Message, AgentResponseUsage.FromResponse(response), null, context.CancellationToken)
             .ConfigureAwait(false);
         return new AiResponse(message, response.Usage, response.FinishReason);
     }
@@ -316,21 +379,18 @@ internal sealed class AgentRun : IAgentRun
                 .RootElement.Clone());
     }
 
-    /// <summary>Default tool execution: registry lookup, error capture.</summary>
-    private static async Task<AiToolResultContent> ExecuteToolAsync(
+    /// <summary>
+    ///     Default tool execution: registry lookup, then the tool itself. Failures are not
+    ///     captured here — they propagate so the surrounding tool chain can report them to
+    ///     the after hook.
+    /// </summary>
+    private static Task<AiToolResultContent> ExecuteToolAsync(
         ToolRegistry? tools, AgentRunContext context, AiToolCallContent call)
     {
         if (tools is null || !tools.TryGet(call.Name, out var tool))
-            return new AiToolResultContent(call.CallId, $"Unknown tool '{call.Name}'.", true);
+            return Task.FromResult(new AiToolResultContent(call.CallId, $"Unknown tool '{call.Name}'.", true));
 
-        try
-        {
-            return await tool.InvokeAsync(call, context.CancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            return new AiToolResultContent(call.CallId, ex.Message, true);
-        }
+        return tool.InvokeAsync(call, context.CancellationToken);
     }
 
     private void Raise(AgentUpdate update)

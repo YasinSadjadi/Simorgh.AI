@@ -28,59 +28,81 @@ public sealed class AgentTelemetryMiddleware(
     public event Action<AgentRunTelemetry>? RunCompleted = onRunCompleted;
 
     /// <inheritdoc />
-    public override Task OnStartupAsync(AgentRunContext context, CancellationToken cancellationToken = default)
+    public override Task<AgentResult> OnStartupAsync(
+        AgentRunContext context, CancellationToken cancellationToken = default)
     {
         var telemetry = new AgentRunTelemetry { RunId = context.RunId };
         var stopwatch = Stopwatch.StartNew();
         context.Items[TelemetryItemKey] = new Collector(telemetry, stopwatch);
+        // Middleware failures that do not break the run are reported as warnings; log them
+        // as they happen so they are not lost even when the run's consumers ignore them.
+        context.WarningReported += warning => logger?.LogWarning(
+            "Agent run {RunId} warning from {Source}: {Message}",
+            context.RunId, warning.Source, warning.Message);
         logger?.LogInformation("Agent run {RunId} started.", context.RunId);
-        return Task.CompletedTask;
+        return Task.FromResult(AgentResult.Ok());
     }
 
     /// <inheritdoc />
-    public override Task OnBeforeAgentResponseAsync(
+    public override Task<AgentResult> OnBeforeAgentResponseAsync(
         AgentRunContext context, CancellationToken cancellationToken = default)
     {
         logger?.LogInformation("Agent run {RunId} model round starting.", context.RunId);
-        return Task.CompletedTask;
+        return Task.FromResult(AgentResult.Ok());
     }
 
     /// <inheritdoc />
-    public override Task<AiMessage> OnAfterAgentResponseAsync(
+    public override Task<AgentResult<AiMessage>> OnAfterAgentResponseAsync(
         AgentRunContext context, AiMessage response, AgentResponseUsage? usage,
-        CancellationToken cancellationToken = default)
+        Exception? error = null, CancellationToken cancellationToken = default)
     {
         var collector = GetCollector(context);
         collector?.ModelRoundFinished(usage);
+
+        if (error is not null)
+        {
+            collector?.RecordError(error.Message);
+            logger?.LogWarning(
+                "Agent run {RunId} model round {Round} failed: {Error}",
+                context.RunId, collector?.Telemetry.ModelRounds, error.Message);
+            return Task.FromResult(AgentResult<AiMessage>.Ok(response));
+        }
 
         logger?.LogInformation(
             "Agent run {RunId} model round {Round} completed (input: {InputTokens} tokens, cached: {CachedTokens} tokens, output: {OutputTokens} tokens, reasoning: {ReasoningTokens} tokens).",
             context.RunId, collector?.Telemetry.ModelRounds, usage?.InputTokens,
             usage?.CachedInputTokens, usage?.OutputTokens, usage?.ReasoningOutputTokens);
-        return Task.FromResult(response);
+        return Task.FromResult(AgentResult<AiMessage>.Ok(response));
     }
 
     /// <inheritdoc />
-    public override Task<AiToolResultContent> OnAfterToolCallAsync(
-        AgentRunContext context, AiToolCallContent call, AiToolResultContent result,
-        CancellationToken cancellationToken = default)
+    public override Task<AgentResult<AiToolResultContent?>> OnAfterToolCallAsync(
+        AgentRunContext context, AiToolCallContent call, AiToolResultContent? result,
+        Exception? error = null, CancellationToken cancellationToken = default)
     {
         var collector = GetCollector(context);
-        collector?.ToolFinished(call.Name, result.IsError);
-        if (result.IsError)
+        var isError = error is not null || result?.IsError == true;
+        collector?.ToolFinished(call.Name, isError);
+        if (isError)
             logger?.LogWarning("Agent run {RunId} tool '{ToolName}' failed: {Error}",
-                context.RunId, call.Name, result.Result);
+                context.RunId, call.Name, error?.Message ?? result?.Result);
         else
             logger?.LogInformation("Agent run {RunId} tool '{ToolName}' completed.",
                 context.RunId, call.Name);
-        return Task.FromResult(result);
+        return Task.FromResult(AgentResult<AiToolResultContent?>.Ok(result));
     }
 
     /// <inheritdoc />
-    public override Task OnEndAsync(AgentRunContext context, CancellationToken cancellationToken = default)
+    public override Task<AgentResult> OnEndAsync(
+        AgentRunContext context, AgentRunEnd end, CancellationToken cancellationToken = default)
     {
         if (context.Items[TelemetryItemKey] is not Collector collector)
-            return Task.CompletedTask;
+            return Task.FromResult(AgentResult.Ok());
+
+        if (end.Reason == AgentRunEndReason.Cancelled)
+            collector.MarkCancelled();
+        if (end.Error is not null)
+            collector.RecordError(end.Error.Message);
 
         var telemetry = collector.Finish();
         var outcome = telemetry.Cancelled ? "cancelled" : telemetry.Error is null ? "completed" : "failed";
@@ -104,7 +126,7 @@ public sealed class AgentTelemetryMiddleware(
                 telemetry.InputTokens, telemetry.OutputTokens);
 
         RunCompleted?.Invoke(telemetry);
-        return Task.CompletedTask;
+        return Task.FromResult(AgentResult.Ok());
     }
 
     private static Collector? GetCollector(AgentRunContext context)
@@ -116,6 +138,16 @@ public sealed class AgentTelemetryMiddleware(
     private sealed class Collector(AgentRunTelemetry telemetry, Stopwatch runStopwatch)
     {
         public AgentRunTelemetry Telemetry { get; } = telemetry;
+
+        public void RecordError(string message)
+        {
+            Telemetry.Error ??= message;
+        }
+
+        public void MarkCancelled()
+        {
+            Telemetry.Cancelled = true;
+        }
 
         public void ModelRoundFinished(AgentResponseUsage? usage)
         {

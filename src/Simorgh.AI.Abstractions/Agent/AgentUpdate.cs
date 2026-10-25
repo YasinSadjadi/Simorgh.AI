@@ -61,3 +61,15 @@ public sealed class AgentRunFailedUpdate(string runId, string error) : AgentUpda
     /// <summary>Description of what went wrong.</summary>
     public string Error { get; } = error;
 }
+
+/// <summary>
+///     A non-fatal problem occurred during the run — typically a middleware that failed
+///     and was skipped. The run continues.
+/// </summary>
+/// <param name="runId">Id of the run this warning belongs to.</param>
+/// <param name="warning">The warning that was reported.</param>
+public sealed class AgentRunWarningUpdate(string runId, AgentRunWarning warning) : AgentUpdate(runId)
+{
+    /// <summary>The warning that was reported.</summary>
+    public AgentRunWarning Warning { get; } = warning;
+}

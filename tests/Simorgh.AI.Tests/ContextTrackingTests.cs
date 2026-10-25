@@ -10,19 +10,20 @@ public sealed class WindowMiddleware(long windowTokens) : AgentMiddleware
 {
     public AgentRunContext? LastContext { get; private set; }
 
-    public override Task OnStartupAsync(AgentRunContext context, CancellationToken cancellationToken = default)
+    public override Task<AgentResult> OnStartupAsync(
+        AgentRunContext context, CancellationToken cancellationToken = default)
     {
         if (windowTokens > 0)
             context.ContextWindowTokens = windowTokens;
-        return Task.CompletedTask;
+        return Task.FromResult(AgentResult.Ok());
     }
 
-    public override Task<AiMessage> OnAfterAgentResponseAsync(
+    public override Task<AgentResult<AiMessage>> OnAfterAgentResponseAsync(
         AgentRunContext context, AiMessage response, AgentResponseUsage? usage,
-        CancellationToken cancellationToken = default)
+        Exception? error = null, CancellationToken cancellationToken = default)
     {
         LastContext = context;
-        return Task.FromResult(response);
+        return Task.FromResult(AgentResult<AiMessage>.Ok(response));
     }
 }
 

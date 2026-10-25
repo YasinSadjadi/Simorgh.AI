@@ -64,13 +64,15 @@ public sealed class FailingAfterUsageChatClient : IChatClient
 public sealed class RecordingUsageMiddleware : AgentMiddleware
 {
     public List<AgentResponseUsage?> Usages { get; } = [];
+    public List<Exception?> Errors { get; } = [];
 
-    public override Task<AiMessage> OnAfterAgentResponseAsync(
+    public override Task<AgentResult<AiMessage>> OnAfterAgentResponseAsync(
         AgentRunContext context, AiMessage response, AgentResponseUsage? usage,
-        CancellationToken cancellationToken = default)
+        Exception? error = null, CancellationToken cancellationToken = default)
     {
         Usages.Add(usage);
-        return Task.FromResult(response);
+        Errors.Add(error);
+        return Task.FromResult(AgentResult<AiMessage>.Ok(response));
     }
 }
 
