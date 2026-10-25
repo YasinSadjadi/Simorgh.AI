@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Simorgh.AI.Abstractions.Agent;
+using Simorgh.AI.Abstractions.Agent.Cancellation;
 using Simorgh.AI.Abstractions.Contents;
 using Simorgh.AI.Abstractions.Messages;
 using Simorgh.AI.Abstractions.Tools;
@@ -25,24 +26,61 @@ internal sealed class AgentRun : IAgentRun
     {
     }
 
-    public string RunId { get; } = Guid.NewGuid().ToString("N");
+    /// <summary>
+    ///     Id of the run; generated unless the caller supplied one through
+    ///     <see cref="AgentRunRequest.RunId" />.
+    /// </summary>
+    public string RunId { get; private set; } = Guid.NewGuid().ToString("N");
 
     public Task<AiMessage> Completion => _completion.Task;
 
     public event Action<AgentUpdate>? Updated;
 
+    private CancellationTokenSource? _cancellationSource;
+    private volatile bool _cancelRequested;
+    private string? _cancelReason;
+
     /// <summary>Creates the run and starts executing it in the background.</summary>
+    /// <exception cref="ArgumentException">
+    ///     <paramref name="request" /> carries a run id that is empty or whitespace.
+    /// </exception>
     public static IAgentRun Start(
         IChatClient chatClient,
         ToolRegistry? tools,
         IToolCallingStrategy toolCallingStrategy,
         AgentPipeline pipeline,
+        string? instructions,
         AgentRunRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IAgentRunRegistry? runRegistry = null)
     {
+        if (request.RunId is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.RunId))
+                throw new ArgumentException("The supplied run id must not be empty or whitespace.", nameof(request));
+        }
+
         var run = new AgentRun();
-        _ = run.ExecuteAsync(chatClient, tools, toolCallingStrategy, pipeline, request, cancellationToken);
+        if (request.RunId is not null)
+            run.RunId = request.RunId;
+        // Register before the background execution starts so the run is cancellable as
+        // soon as Submit returns.
+        var registration = runRegistry?.Register(run.RunId, run.Cancel);
+        _ = run.ExecuteAsync(
+            chatClient, tools, toolCallingStrategy, pipeline, instructions, request, cancellationToken, registration);
         return run;
+    }
+
+    /// <summary>
+    ///     Cancels the run. Streaming from the model and any in-flight tool calls are
+    ///     aborted, and an <see cref="AgentRunCancelledUpdate" /> is raised. Idempotent.
+    /// </summary>
+    /// <param name="reason">Optional reason surfaced through <see cref="AgentRunCancelledUpdate" />.</param>
+    internal void Cancel(string? reason = null)
+    {
+        _cancelRequested = true;
+        _cancelReason = reason;
+        _cancellationSource?.Cancel();
     }
 
     private async Task ExecuteAsync(
@@ -50,10 +88,20 @@ internal sealed class AgentRun : IAgentRun
         ToolRegistry? tools,
         IToolCallingStrategy toolCallingStrategy,
         AgentPipeline pipeline,
+        string? instructions,
         AgentRunRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IDisposable? registration)
     {
-        var context = new AgentRunContext(RunId, [.. request.Messages], cancellationToken);
+        var messages = new List<AiMessage>();
+        if (!string.IsNullOrWhiteSpace(instructions))
+            messages.Add(AiMessage.FromText(AiMessageRole.System, instructions));
+        messages.AddRange(request.Messages);
+
+        using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _cancellationSource = cancellationSource;
+        var runToken = cancellationSource.Token;
+        var context = new AgentRunContext(RunId, messages, runToken);
 
         var availableTools = tools?.Tools
             .Select(t => new AiToolDeclaration(
@@ -67,14 +115,14 @@ internal sealed class AgentRun : IAgentRun
         Raise(new AgentRunStartedUpdate(RunId));
         try
         {
-            await pipeline.OnStartupAsync(context, cancellationToken).ConfigureAwait(false);
+            await pipeline.OnStartupAsync(context, runToken).ConfigureAwait(false);
 
             AiMessage reply;
             var round = 0;
             while (true)
             {
                 var declarations = await toolCallingStrategy.GetToolDeclarationsAsync(
-                    availableTools, context, round, cancellationToken).ConfigureAwait(false);
+                    availableTools, context, round, runToken).ConfigureAwait(false);
 
                 reply = await pipeline.InvokeResponseAsync(
                     context, ctx => CallModelAsync(chatClient, declarations, ctx, request.Stream))
@@ -94,7 +142,7 @@ internal sealed class AgentRun : IAgentRun
                     context, calls,
                     (call, ct) => pipeline.InvokeToolAsync(
                         context, call, (ctx, c) => ExecuteToolAsync(tools, ctx, c)),
-                    cancellationToken).ConfigureAwait(false);
+                    runToken).ConfigureAwait(false);
 
                 foreach (var message in followUpMessages)
                 {
@@ -105,6 +153,11 @@ internal sealed class AgentRun : IAgentRun
 
             Raise(new AgentRunCompletedUpdate(RunId, reply));
             _completion.TrySetResult(reply);
+        }
+        catch (OperationCanceledException) when (_cancelRequested)
+        {
+            Raise(new AgentRunCancelledUpdate(RunId, _cancelReason));
+            _completion.TrySetCanceled(runToken);
         }
         catch (OperationCanceledException)
         {
@@ -117,6 +170,8 @@ internal sealed class AgentRun : IAgentRun
         }
         finally
         {
+            registration?.Dispose();
+            _cancellationSource = null;
             await pipeline.OnEndAsync(context, CancellationToken.None).ConfigureAwait(false);
         }
     }

@@ -41,6 +41,15 @@ public sealed class AgentRunCompletedUpdate(string runId, AiMessage message) : A
     public AiMessage Message { get; } = message;
 }
 
+/// <summary>The run was cancelled before it could finish.</summary>
+/// <param name="runId">Id of the run that was cancelled.</param>
+/// <param name="reason">Optional reason supplied by whoever requested the cancellation.</param>
+public sealed class AgentRunCancelledUpdate(string runId, string? reason = null) : AgentUpdate(runId)
+{
+    /// <summary>Optional reason supplied by whoever requested the cancellation.</summary>
+    public string? Reason { get; } = reason;
+}
+
 /// <summary>The run failed.</summary>
 /// <param name="runId">Id of the run that has failed.</param>
 /// <param name="error">Description of what went wrong.</param>
