@@ -1,6 +1,8 @@
 <Project>
     <PropertyGroup>
-        <TargetFramework>netstandard2.0</TargetFramework>
+        <!-- Multi-target: netstandard2.0 serves .NET Framework 4.6.1+ and older stacks;
+             net8.0 gives modern consumers a dependency-free asset (no Microsoft.Bcl.AsyncInterfaces). -->
+        <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <LangVersion>latest</LangVersion>
