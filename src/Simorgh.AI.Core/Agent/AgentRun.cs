@@ -77,7 +77,8 @@ internal sealed class AgentRun : IAgentRun
                     availableTools, context, round, cancellationToken).ConfigureAwait(false);
 
                 reply = await pipeline.InvokeResponseAsync(
-                    context, ctx => CallModelAsync(chatClient, declarations, ctx)).ConfigureAwait(false);
+                    context, ctx => CallModelAsync(chatClient, declarations, ctx, request.Stream))
+                    .ConfigureAwait(false);
                 context.Messages.Add(reply);
 
                 var calls = reply.Contents.OfType<AiToolCallContent>().ToList();
@@ -121,18 +122,41 @@ internal sealed class AgentRun : IAgentRun
     }
 
     /// <summary>Terminal stage of the response chain: the actual model call.</summary>
-    private static async Task<AiMessage> CallModelAsync(
-        IChatClient chatClient, IReadOnlyList<AiToolDeclaration> declarations, AgentRunContext context)
+    /// <param name="stream">
+    ///     When <c>true</c>, the response is streamed and each text delta is raised as an
+    ///     <see cref="AgentStreamUpdate" /> while it is produced.
+    /// </param>
+    private async Task<AiMessage> CallModelAsync(
+        IChatClient chatClient, IReadOnlyList<AiToolDeclaration> declarations, AgentRunContext context,
+        bool stream)
     {
         var chatMessages = context.Messages.Select(AiMessageMapper.ToChatMessage).ToList();
         var options = declarations.Count > 0
             ? new ChatOptions { Tools = [.. declarations.Select(ToChatTool)] }
             : null;
 
-        var response = await chatClient.GetResponseAsync(
-                chatMessages, options, context.CancellationToken)
-            .ConfigureAwait(false);
-        return AiMessageMapper.ToAiMessage(response);
+        if (!stream)
+        {
+            var response = await chatClient.GetResponseAsync(
+                    chatMessages, options, context.CancellationToken)
+                .ConfigureAwait(false);
+            return AiMessageMapper.ToAiMessage(response);
+        }
+
+        var contents = new List<AIContent>();
+        await foreach (var update in chatClient
+                           .GetStreamingResponseAsync(chatMessages, options, context.CancellationToken)
+                           .ConfigureAwait(false))
+        {
+            foreach (var content in update.Contents)
+            {
+                if (content is TextContent text && !string.IsNullOrEmpty(text.Text))
+                    Raise(new AgentStreamUpdate(RunId, text.Text));
+                contents.Add(content);
+            }
+        }
+
+        return AiMessageMapper.ToAiMessage(contents);
     }
 
     /// <summary>Converts a framework declaration into a non-invocable tool for the model.</summary>

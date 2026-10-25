@@ -21,8 +21,27 @@ public static class AiMessageMapper
     /// <summary>Converts a provider response into a Simorgh.AI agent message.</summary>
     public static AiMessage ToAiMessage(ChatResponse response)
     {
-        var contents = response.Messages.SelectMany(m => m.Contents).Select(ToAiContent).ToList();
-        return new AiMessage(AiMessageRole.Agent, contents);
+        return ToAiMessage(response.Messages.SelectMany(m => m.Contents).ToList());
+    }
+
+    /// <summary>
+    ///     Converts accumulated contents (e.g. gathered from a streamed response) into a
+    ///     Simorgh.AI agent message, merging consecutive text parts into a single
+    ///     <see cref="AiTextContent" />.
+    /// </summary>
+    public static AiMessage ToAiMessage(IReadOnlyList<AIContent> contents)
+    {
+        var mapped = new List<AiContent>();
+        foreach (var content in contents.Select(ToAiContent))
+        {
+            if (content is AiTextContent text &&
+                mapped.Count > 0 && mapped[mapped.Count - 1] is AiTextContent previous)
+                mapped[mapped.Count - 1] = new AiTextContent(previous.Text + text.Text);
+            else
+                mapped.Add(content);
+        }
+
+        return new AiMessage(AiMessageRole.Agent, mapped);
     }
 
     private static ChatRole ToChatRole(AiMessageRole role)
