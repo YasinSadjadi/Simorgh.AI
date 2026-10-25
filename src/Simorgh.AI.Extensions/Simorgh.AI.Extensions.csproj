@@ -2,9 +2,12 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Simorgh.AI.Core\Simorgh.AI.Core.csproj"/>
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions"/>
+        <PackageReference Include="System.Diagnostics.DiagnosticSource"/>
     </ItemGroup>
 
     <PropertyGroup>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <Description>Built-in extensions for the Simorgh.AI framework, such as ready-made tool-calling strategies.</Description>
     </PropertyGroup>
 
