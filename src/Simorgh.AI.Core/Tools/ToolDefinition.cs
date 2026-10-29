@@ -20,8 +20,8 @@ namespace Simorgh.AI.Core.Tools;
 public sealed class ToolDefinition(
     string identifier,
     string description,
-    IToolService service,
-    AiToolMethodAttribute attribute,
+    IToolService? service,
+    AiToolMethodAttribute? attribute,
     AIFunctionDeclaration declaration,
     Func<AiToolCallContent, CancellationToken, Task<AiToolResultContent>> invokeAsync)
 {
@@ -31,11 +31,11 @@ public sealed class ToolDefinition(
     /// <summary>What the tool does, shown to the model.</summary>
     public string Description { get; } = description;
 
-    /// <summary>The service that owns the tool.</summary>
-    public IToolService Service { get; } = service;
+    /// <summary>The service that owns the tool, or null for a dynamically registered tool.</summary>
+    public IToolService? Service { get; } = service;
 
-    /// <summary>The attribute that introduced this tool.</summary>
-    public AiToolMethodAttribute Attribute { get; } = attribute;
+    /// <summary>The attribute that introduced this tool, or null for a dynamically registered tool.</summary>
+    public AiToolMethodAttribute? Attribute { get; } = attribute;
 
     /// <summary>
     ///     The tool as advertised to the model via <see cref="ChatOptions.Tools" />. It is a

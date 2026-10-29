@@ -26,6 +26,53 @@ run.Updated += update =>
 var answer = await run.Completion;
 ```
 
+## Runtime tools
+
+Tools obtained from an API or another source can be registered alongside `IToolService`
+instances. Supply the full identifier, description, argument JSON Schema, and a handler:
+
+```csharp
+using Simorgh.AI.Abstractions.Contents;
+using Simorgh.AI.Core.Tools;
+
+var tools = new ToolRegistry();
+tools.Register("weather/lookup", "Look up the weather", """
+    {"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}
+    """, async (call, cancellationToken) =>
+    {
+        // Forward call.ArgumentsJson to an API, invoke local code, or use another executor.
+        var output = await ExecuteWeatherAsync(call.ArgumentsJson, cancellationToken);
+        return new AiToolResultContent(call.CallId, output);
+    });
+// Pass tools as AgentServiceOptions.Tools when initializing the agent.
+```
+
+The schema describes the arguments exposed to the model; handlers are responsible for
+validating inputs and returning a result with the original call ID. Exceptions flow through
+the agent's normal tool error handling and middleware. Runtime tools use the same tool-calling
+strategies as service tools, including lazy discovery and loading. Identifiers must be unique
+across both kinds of registration. Register tools before starting runs; a run snapshots the
+available declarations at startup.
+
+Alternatively, implement `IDynamicToolHandler` to keep execution logic in a separate class
+and pass an instance to the same `Register` method:
+
+```csharp
+using Simorgh.AI.Abstractions.Tools;
+
+tools.Register("weather/get", "Get the weather", toolSchema, new WeatherToolHandler());
+
+public sealed class WeatherToolHandler : IDynamicToolHandler
+{
+    public Task<AiToolResultContent> InvokeAsync(
+        AiToolCallContent call, CancellationToken cancellationToken = default)
+    {
+        // Validate call.ArgumentsJson and execute the tool here.
+        return Task.FromResult(new AiToolResultContent(call.CallId, "Sunny"));
+    }
+}
+```
+
 ## Build and package
 
 ```powershell
