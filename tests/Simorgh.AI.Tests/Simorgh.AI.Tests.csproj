@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Simorgh.AI.Core\Simorgh.AI.Core.csproj" />
     <ProjectReference Include="..\..\src\Simorgh.AI.Extensions\Simorgh.AI.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\Simorgh.AI.Routing\Simorgh.AI.Routing.csproj" />
   </ItemGroup>
 
 </Project>
