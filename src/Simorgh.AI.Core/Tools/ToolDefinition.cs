@@ -31,7 +31,7 @@ public sealed class ToolDefinition(
     /// <summary>What the tool does, shown to the model.</summary>
     public string Description { get; } = description;
 
-    /// <summary>The service that owns the tool, or null for a dynamically registered tool.</summary>
+    /// <summary>The service that owns the tool, or null for a standalone runtime tool.</summary>
     public IToolService? Service { get; } = service;
 
     /// <summary>The attribute that introduced this tool, or null for a dynamically registered tool.</summary>
@@ -45,4 +45,11 @@ public sealed class ToolDefinition(
 
     /// <summary>Executes a call to this tool and returns the result for the model.</summary>
     public Func<AiToolCallContent, CancellationToken, Task<AiToolResultContent>> InvokeAsync { get; } = invokeAsync;
+
+    internal AiToolDeclaration ToToolDeclaration() => new(
+        Identifier,
+        Description,
+        Declaration.JsonSchema.ValueKind == System.Text.Json.JsonValueKind.Undefined
+            ? null
+            : Declaration.JsonSchema.GetRawText());
 }

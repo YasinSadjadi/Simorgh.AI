@@ -116,7 +116,10 @@ internal sealed class AgentRun : IAgentRun
         using var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _cancellationSource = cancellationSource;
         var runToken = cancellationSource.Token;
-        var context = new AgentRunContext(RunId, messages, runToken);
+        var context = new AgentRunContext(RunId, messages, runToken)
+        {
+            ToolServices = tools?.Services ?? [],
+        };
         // Middleware failures that do not break the run surface to consumers as warnings.
         context.WarningReported += warning => Raise(new AgentRunWarningUpdate(RunId, warning));
         // Only a window the developer explicitly supplied is used; without it no
@@ -124,12 +127,7 @@ internal sealed class AgentRun : IAgentRun
         context.ContextWindowTokens = contextWindowTokens;
 
         var availableTools = tools?.Tools
-            .Select(t => new AiToolDeclaration(
-                t.Identifier,
-                t.Description,
-                t.Declaration.JsonSchema.ValueKind == JsonValueKind.Undefined
-                    ? null
-                    : t.Declaration.JsonSchema.GetRawText()))
+            .Select(t => t.ToToolDeclaration())
             .ToList() as IReadOnlyList<AiToolDeclaration> ?? [];
 
         Raise(new AgentRunStartedUpdate(RunId));

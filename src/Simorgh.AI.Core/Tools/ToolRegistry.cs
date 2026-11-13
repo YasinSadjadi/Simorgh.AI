@@ -7,19 +7,21 @@ using Simorgh.AI.Abstractions.Tools;
 namespace Simorgh.AI.Core.Tools;
 
 /// <summary>
-///     Collects tools from <see cref="IToolService" /> objects. Each public method annotated
-///     with <see cref="AiToolMethodAttribute" /> becomes one tool; the service's
-///     <see cref="IToolService.Identifier" /> and <see cref="IToolService.Description" /> describe
-///     the group the tool belongs to.
+///     Collects tools from attributed services, <see cref="DynamicToolService" /> objects,
+///     and standalone runtime definitions. Every tool uses the same agent execution pipeline.
 /// </summary>
 public sealed class ToolRegistry
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly Dictionary<string, ToolDefinition> _tools = new(StringComparer.Ordinal);
+    private readonly List<AiToolServiceDeclaration> _services = [];
 
     /// <summary>All registered tools, keyed by identifier.</summary>
     public IReadOnlyCollection<ToolDefinition> Tools => [.. _tools.Values];
+
+    /// <summary>Registered groups and their descriptions, snapshotted for tool-calling strategies.</summary>
+    public IReadOnlyList<AiToolServiceDeclaration> Services => Array.AsReadOnly(_services.ToArray());
 
     /// <summary>The tools as advertised to the model via <see cref="ChatOptions.Tools" />.</summary>
     public IList<AITool> ChatTools => [.. _tools.Values.Select(AITool (t) => t.Declaration)];
@@ -29,6 +31,28 @@ public sealed class ToolRegistry
     {
         if (service is null) throw new ArgumentNullException(nameof(service));
 
+        var definitions = service is DynamicToolService dynamicService
+            ? CreateDynamicTools(dynamicService)
+            : CreateMethodTools(service);
+        var identifiers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tool in definitions)
+        {
+            if (!identifiers.Add(tool.Identifier) || _tools.ContainsKey(tool.Identifier))
+                throw new InvalidOperationException($"A tool with identifier '{tool.Identifier}' is already registered.");
+        }
+
+        var declaration = new AiToolServiceDeclaration(
+            service.Identifier, service.Description, definitions.Select(t => t.ToToolDeclaration()));
+        foreach (var tool in definitions)
+            Add(tool);
+        _services.Add(declaration);
+        return this;
+    }
+
+    private static List<ToolDefinition> CreateMethodTools(IToolService service)
+    {
+        var definitions = new List<ToolDefinition>();
+
         foreach (var method in service.GetType()
                      .GetMethods(BindingFlags.Public | BindingFlags.Instance)
                      .Where(m => m.GetCustomAttribute<AiToolMethodAttribute>() is not null))
@@ -36,12 +60,33 @@ public sealed class ToolRegistry
             var attribute = method.GetCustomAttribute<AiToolMethodAttribute>()!;
             var closedMethod = method;
             var identifier = $"{service.Identifier}/{attribute.ToolName}";
-            Add(new ToolDefinition(identifier, attribute.Description, service, attribute,
+            definitions.Add(new ToolDefinition(identifier, attribute.Description, service, attribute,
                 AIFunctionFactory.Create(closedMethod, service, identifier, attribute.Description).AsDeclarationOnly(),
                 (call, ct) => InvokeMethodAsync(service, closedMethod, call, ct)));
         }
 
-        return this;
+        return definitions;
+    }
+
+    private static List<ToolDefinition> CreateDynamicTools(DynamicToolService service)
+    {
+        var definitions = new List<ToolDefinition>(service.Tools.Count);
+        foreach (var tool in service.Tools)
+        {
+            if (tool is not AIFunction function)
+                throw new ArgumentException(
+                    "A dynamic tool service only supports invocable AIFunction tools.", nameof(service));
+            if (string.IsNullOrWhiteSpace(function.Name))
+                throw new ArgumentException("A dynamic tool must have a name.", nameof(service));
+
+            var identifier = $"{service.Identifier}/{function.Name}";
+            var description = function.Description ?? string.Empty;
+            var declaration = AIFunctionFactory.CreateDeclaration(identifier, description, function.JsonSchema);
+            definitions.Add(new ToolDefinition(identifier, description, service, null, declaration,
+                (call, ct) => InvokeFunctionAsync(function, call, ct)));
+        }
+
+        return definitions;
     }
 
     /// <summary>
@@ -135,6 +180,18 @@ public sealed class ToolRegistry
         };
 
         return new AiToolResultContent(call.CallId, resultText);
+    }
+
+    private static async Task<AiToolResultContent> InvokeFunctionAsync(
+        AIFunction function, AiToolCallContent call, CancellationToken cancellationToken)
+    {
+        var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson, JsonOptions)
+            ?? throw new JsonException("Tool arguments must be a JSON object.");
+        var result = await function.InvokeAsync(new AIFunctionArguments(arguments), cancellationToken)
+            .ConfigureAwait(false);
+        return new AiToolResultContent(call.CallId,
+            result is null ? string.Empty : JsonSerializer.Serialize(result, function.JsonSerializerOptions));
     }
 
     private static async Task<string> SerializeTaskResultAsync(Task task)

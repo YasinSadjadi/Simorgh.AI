@@ -51,7 +51,7 @@ The schema describes the arguments exposed to the model; handlers are responsibl
 validating inputs and returning a result with the original call ID. Exceptions flow through
 the agent's normal tool error handling and middleware. Runtime tools use the same tool-calling
 strategies as service tools, including lazy discovery and loading. Identifiers must be unique
-across both kinds of registration. Register tools before starting runs; a run snapshots the
+across all kinds of registration. Register tools before starting runs; a run snapshots the
 available declarations at startup.
 
 Alternatively, implement `IDynamicToolHandler` to keep execution logic in a separate class
@@ -72,6 +72,49 @@ public sealed class WeatherToolHandler : IDynamicToolHandler
     }
 }
 ```
+
+### Groups of existing AI tools
+
+Wrap existing `Microsoft.Extensions.AI.AITool` instances in a `DynamicToolService`:
+
+```csharp
+using Microsoft.Extensions.AI;
+using Simorgh.AI.Core.Tools;
+
+var currentWeatherTool = AIFunctionFactory.Create(
+    (string city) => $"Sunny in {city}",
+    name: "current", description: "Get the current weather");
+var forecastTool = AIFunctionFactory.Create(
+    (string city) => $"Rain tomorrow in {city}",
+    name: "forecast", description: "Get tomorrow's forecast");
+
+var service = new DynamicToolService(
+    identifier: "weather",
+    description: "Tools for weather information",
+    tools: [currentWeatherTool, forecastTool]);
+
+var registry = new ToolRegistry().Register(service);
+// Pass registry as AgentServiceOptions.Tools.
+```
+
+Each tool is registered as `serviceIdentifier/functionName`, such as `weather/current`.
+The collection is copied, and the original functions are not renamed or disposed. Every
+entry must be an invocable `AIFunction`; declaration-only and provider-hosted tools are
+rejected at registration. A rejected service adds no tools to the registry.
+
+Dynamic services implement `IToolService` and can be registered alongside attributed
+services, delegate handlers, and `IDynamicToolHandler` instances. Calls go through the
+normal middleware pipeline before invoking the original function with its argument
+binding, serializer options, and cancellation token. Results are serialized to the
+framework's string tool-result format, retaining the original call ID.
+
+The group description stays separate from each function's description. Strategies can
+inspect registered groups through `context.ToolServices` (`AiToolServiceDeclaration`
+objects containing `Identifier`, `Description`, and `Tools`); this metadata is snapshotted
+before startup and is also available as `registry.Services`. Standalone runtime tools stay
+in the flat `availableTools` list. The `IToolCallingStrategy` contract is unchanged:
+`Instant` advertises all tools, and `Lazy` continues to discover and load individual tools.
+A custom strategy can use group metadata to decide which tools to expose or load.
 
 ## Build and package
 

@@ -1,4 +1,5 @@
 using Simorgh.AI.Abstractions.Messages;
+using Simorgh.AI.Abstractions.Tools;
 
 namespace Simorgh.AI.Abstractions.Agent;
 
@@ -29,6 +30,13 @@ public sealed class AgentRunContext(
 
     /// <summary>Values produced or consumed by middleware during the run.</summary>
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
+
+    /// <summary>
+    ///     Registered tool services and their declarations, snapshotted before startup.
+    ///     Tool-calling strategies may use this metadata for group discovery or loading;
+    ///     standalone runtime tools remain in the strategy's flat list of available tools.
+    /// </summary>
+    public IReadOnlyList<AiToolServiceDeclaration> ToolServices { get; set; } = [];
 
     /// <summary>Every warning reported during the run, in the order they occurred.</summary>
     public IReadOnlyList<AgentRunWarning> Warnings => _warnings;

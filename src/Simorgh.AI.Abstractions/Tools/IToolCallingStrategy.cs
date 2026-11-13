@@ -18,6 +18,8 @@ public interface IToolCallingStrategy
     ///     Returns the tools to advertise to the model for the given round (0-based).
     ///     <paramref name="availableTools" /> is everything registered; a strategy may
     ///     return all of it, a subset, meta-tools of its own, or nothing.
+    ///     Group descriptions and their tools are available through
+    ///     <see cref="AgentRunContext.ToolServices" /> without changing the flat tool list.
     /// </summary>
     Task<IReadOnlyList<AiToolDeclaration>> GetToolDeclarationsAsync(
         IReadOnlyList<AiToolDeclaration> availableTools,
