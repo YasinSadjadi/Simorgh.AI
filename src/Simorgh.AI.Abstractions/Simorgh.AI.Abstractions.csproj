@@ -9,7 +9,8 @@
     </ItemGroup>
 
     <PropertyGroup>
-        <Description>Public contracts and shared types for the Simorgh.AI framework.</Description>
+        <Description>Shared .NET contracts for Simorgh.AI agents, including run and middleware interfaces, chat messages, multimodal content, tool calling, and agent skills.</Description>
+        <PackageTags>$(PackageTags) ai-agents abstractions chat-messages multimodal tool-calling agent-skills middleware</PackageTags>
     </PropertyGroup>
 
 </Project>

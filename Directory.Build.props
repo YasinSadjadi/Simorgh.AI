@@ -8,7 +8,7 @@
         <LangVersion>latest</LangVersion>
 
         <Version>0.1.8</Version>
-        <Authors>Simorgh AI Contributors</Authors>
+        <Authors>Yasin Sadjadi</Authors>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
         <PackageId>$(MSBuildProjectName)</PackageId>
@@ -16,10 +16,13 @@
         <RepositoryUrl>$(PackageProjectUrl)</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
         <PackageReadmeFile>README.md</PackageReadmeFile>
-        <PackageTags>ai;dotnet;artificial-intelligence</PackageTags>
+        <PackageIcon>simorgh.png</PackageIcon>
+        <PackageReleaseNotes Condition="'$(Version)' == '0.1.8'">Updated NuGet listings with author information, GitHub links, a package icon, a quickstart, and package-specific descriptions and search tags.</PackageReleaseNotes>
+        <PackageTags>simorgh ai dotnet csharp artificial-intelligence</PackageTags>
         <IsPackable>true</IsPackable>
     </PropertyGroup>
     <ItemGroup>
         <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" />
+        <None Include="$(MSBuildThisFileDirectory)assets/simorgh.png" Pack="true" PackagePath="/" />
     </ItemGroup>
 </Project>

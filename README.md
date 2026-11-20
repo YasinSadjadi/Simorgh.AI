@@ -1,19 +1,44 @@
 # Simorgh.AI
 
-Simorgh.AI is a .NET framework for building AI agents with streaming, tool calling, and model routing.
+Simorgh.AI is a .NET framework for building AI agents on `Microsoft.Extensions.AI`. Use your existing `IChatClient` to run agents with streaming responses, tool calling, skills, and middleware. Add model routing for fallback or weighted selection across chat clients.
 
 [Source code on GitHub](https://github.com/YasinSadjadi/Simorgh.AI) · [Report an issue](https://github.com/YasinSadjadi/Simorgh.AI/issues)
 
-## Projects
+## Quickstart
 
-- `Simorgh.AI.Abstractions`: public contracts shared by the framework and integrations; references `Microsoft.Extensions.AI.Abstractions`.
-- `Simorgh.AI.Core`: the framework's core implementation; references Abstractions.
-- `Simorgh.AI.Integrations`: provider and service integrations; references Abstractions.
-- `Simorgh.AI.Extensions`: ready-made tool-calling strategies and observability (`AgentTelemetryMiddleware`: ILogger-based run/round/tool logging, token accounting, and `System.Diagnostics.Metrics` metrics on the `Simorgh.AI` meter, OpenTelemetry-compatible).
-- `Simorgh.AI.Routing`: an `IChatClient` adapter and strategies for routing requests between models.
+Install `Simorgh.AI.Extensions` to get the agent runtime and the built-in tool-calling strategies.
 
-The packages target .NET Standard 2.0 and .NET 8. Package IDs follow the project names above.
-Shared NuGet package metadata is configured in `Directory.Build.props`; dependency versions are managed centrally in `Directory.Packages.props`.
+```sh
+dotnet add package Simorgh.AI.Extensions
+```
+
+Pass your configured `Microsoft.Extensions.AI.IChatClient` as `chatClient`.
+
+```csharp
+using Simorgh.AI.Abstractions.Agent;
+using Simorgh.AI.Abstractions.Messages;
+using Simorgh.AI.Core.Agent;
+using Simorgh.AI.Extensions.Tools;
+
+var agent = AgentService.Initialize(chatClient, new InstantToolCallingStrategy());
+var request = new AgentRunRequest(new[]
+{
+    AiMessage.FromText(AiMessageRole.User, "Summarize the benefits of streaming AI responses.")
+});
+var response = await agent.RunAsync(request);
+```
+
+## Packages
+
+| Package | What it provides |
+| --- | --- |
+| [Simorgh.AI.Core](https://www.nuget.org/packages/Simorgh.AI.Core) | Agent runtime, streaming, tool registration, skill discovery, and middleware. |
+| [Simorgh.AI.Extensions](https://www.nuget.org/packages/Simorgh.AI.Extensions) | Instant and on-demand tool calling, agent logging, token usage metrics, and in-memory run cancellation. |
+| [Simorgh.AI.Abstractions](https://www.nuget.org/packages/Simorgh.AI.Abstractions) | Contracts for agents, messages, multimodal content, tools, skills, and middleware. |
+| [Simorgh.AI.Routing](https://www.nuget.org/packages/Simorgh.AI.Routing) | An `IChatClient` adapter with fallback and weighted model selection. |
+| [Simorgh.AI.Integrations](https://www.nuget.org/packages/Simorgh.AI.Integrations) | Reserved for future provider and service integrations. |
+
+The packages target .NET Standard 2.0 and .NET 8 and are distributed under the MIT license.
 
 ## Streaming
 
@@ -174,7 +199,6 @@ dotnet pack Simorgh.AI.sln -c Release
 
 The generated NuGet packages are written to each project's `bin/Release` directory.
 
-The solution and package prefix are initial names and can be changed as the framework's feature set is defined.
 
 ## Model routing
 

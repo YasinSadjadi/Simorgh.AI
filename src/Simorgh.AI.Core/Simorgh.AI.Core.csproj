@@ -10,7 +10,8 @@
     </ItemGroup>
 
     <PropertyGroup>
-        <Description>Core runtime and orchestration components for the Simorgh.AI framework.</Description>
+        <Description>Build AI agents in .NET with Microsoft.Extensions.AI and IChatClient. Run agents with streaming responses, function calling, dynamic tool registration, skill discovery, and middleware.</Description>
+        <PackageTags>$(PackageTags) llm generative-ai ai-agents agent-framework agent-orchestration microsoft-extensions-ai ichatclient streaming tool-calling function-calling agent-skills middleware</PackageTags>
         <!-- UsageDetails per-modality properties are marked evaluation-only (MEAI001); used intentionally. -->
         <NoWarn>$(NoWarn);MEAI001</NoWarn>
     </PropertyGroup>

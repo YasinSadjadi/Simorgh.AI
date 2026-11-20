@@ -9,7 +9,8 @@
     </ItemGroup>
 
     <PropertyGroup>
-        <Description>Provider and service integrations for the Simorgh.AI framework.</Description>
+        <Description>Placeholder package for future provider and service integrations in Simorgh.AI.</Description>
+        <PackageTags>$(PackageTags) ai-integrations</PackageTags>
     </PropertyGroup>
 
 </Project>

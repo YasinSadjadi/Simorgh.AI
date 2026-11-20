@@ -8,7 +8,8 @@
 
     <PropertyGroup>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <Description>Built-in extensions for the Simorgh.AI framework, such as ready-made tool-calling strategies.</Description>
+        <Description>Built-in extensions for Simorgh.AI agents in .NET, including instant and on-demand tool calling, agent logging, token usage metrics, and in-memory run cancellation.</Description>
+        <PackageTags>$(PackageTags) llm ai-agents tool-calling function-calling tool-discovery observability logging metrics token-usage opentelemetry</PackageTags>
     </PropertyGroup>
 
 </Project>
