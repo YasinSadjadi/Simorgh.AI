@@ -7,12 +7,19 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <LangVersion>latest</LangVersion>
 
-        <Version>0.1.7</Version>
+        <Version>0.1.8</Version>
         <Authors>Simorgh AI Contributors</Authors>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
         <PackageId>$(MSBuildProjectName)</PackageId>
+        <PackageProjectUrl>https://github.com/YasinSadjadi/Simorgh.AI</PackageProjectUrl>
+        <RepositoryUrl>$(PackageProjectUrl)</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageTags>ai;dotnet;artificial-intelligence</PackageTags>
         <IsPackable>true</IsPackable>
     </PropertyGroup>
+    <ItemGroup>
+        <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" />
+    </ItemGroup>
 </Project>

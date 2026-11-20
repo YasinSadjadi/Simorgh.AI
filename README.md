@@ -1,6 +1,8 @@
 # Simorgh.AI
 
-Simorgh.AI is a .NET AI framework under development. The solution is split into small class libraries so its public contracts, framework implementation, and integrations can evolve independently and be published as NuGet packages.
+Simorgh.AI is a .NET framework for building AI agents with streaming, tool calling, and model routing.
+
+[Source code on GitHub](https://github.com/YasinSadjadi/Simorgh.AI) · [Report an issue](https://github.com/YasinSadjadi/Simorgh.AI/issues)
 
 ## Projects
 
@@ -8,8 +10,9 @@ Simorgh.AI is a .NET AI framework under development. The solution is split into 
 - `Simorgh.AI.Core`: the framework's core implementation; references Abstractions.
 - `Simorgh.AI.Integrations`: provider and service integrations; references Abstractions.
 - `Simorgh.AI.Extensions`: ready-made tool-calling strategies and observability (`AgentTelemetryMiddleware`: ILogger-based run/round/tool logging, token accounting, and `System.Diagnostics.Metrics` metrics on the `Simorgh.AI` meter, OpenTelemetry-compatible).
+- `Simorgh.AI.Routing`: an `IChatClient` adapter and strategies for routing requests between models.
 
-All projects currently target .NET 10. Package IDs follow the project names and start at version `0.1.0`.
+The packages target .NET Standard 2.0 and .NET 8. Package IDs follow the project names above.
 Shared NuGet package metadata is configured in `Directory.Build.props`; dependency versions are managed centrally in `Directory.Packages.props`.
 
 ## Streaming
