@@ -1,6 +1,7 @@
 using Simorgh.AI.Abstractions.Agent;
 using Simorgh.AI.Abstractions.Agent.Cancellation;
 using Simorgh.AI.Abstractions.Agent.Middleware;
+using Simorgh.AI.Core.Skills;
 using Simorgh.AI.Core.Tools;
 
 namespace Simorgh.AI.Core.Agent;
@@ -14,6 +15,9 @@ public sealed class AgentServiceOptions
 {
     /// <summary>Tools the agent can call; <c>null</c> means the agent runs without tools.</summary>
     public ToolRegistry? Tools { get; set; }
+
+    /// <summary>Optional skills available for discovery and explicit activation.</summary>
+    public SkillSet? Skills { get; set; }
 
     /// <summary>Optional middleware hooks around every run.</summary>
     public IEnumerable<AgentMiddleware>? Middlewares { get; set; }

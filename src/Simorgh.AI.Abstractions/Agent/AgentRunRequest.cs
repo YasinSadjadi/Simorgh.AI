@@ -32,6 +32,9 @@ public sealed class AgentRunRequest(
     public IReadOnlyDictionary<string, object?> Properties { get; } =
         properties ?? new Dictionary<string, object?>();
 
+    /// <summary>Skill ids explicitly selected for this run, for example from a chat UI.</summary>
+    public IReadOnlyList<string> SkillIds { get; set; } = [];
+
     /// <summary>
     ///     When <c>true</c>, model responses are streamed and incremental text is reported through
     ///     <see cref="AgentStreamUpdate" /> updates while the run is in progress.

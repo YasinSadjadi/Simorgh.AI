@@ -7,6 +7,7 @@ using Simorgh.AI.Abstractions.Agent.Middleware;
 using Simorgh.AI.Abstractions.Contents;
 using Simorgh.AI.Abstractions.Messages;
 using Simorgh.AI.Abstractions.Tools;
+using Simorgh.AI.Core.Skills;
 using Simorgh.AI.Core.Tools;
 
 namespace Simorgh.AI.Core.Agent;
@@ -49,6 +50,7 @@ internal sealed class AgentRun : IAgentRun
     ///     This is the only way to guarantee a handler sees every update, including
     ///     <see cref="AgentRunStartedUpdate" />.
     /// </param>
+    /// <param name="skills">Optional skills enabled for the run.</param>
     /// <exception cref="ArgumentException">
     ///     <paramref name="request" /> carries a run id that is empty or whitespace.
     /// </exception>
@@ -62,7 +64,8 @@ internal sealed class AgentRun : IAgentRun
         CancellationToken cancellationToken,
         IAgentRunRegistry? runRegistry = null,
         Action<IAgentRun>? subscribe = null,
-        long? contextWindowTokens = null)
+        long? contextWindowTokens = null,
+        SkillSet? skills = null)
     {
         if (request.RunId is not null)
         {
@@ -70,6 +73,7 @@ internal sealed class AgentRun : IAgentRun
                 throw new ArgumentException("The supplied run id must not be empty or whitespace.", nameof(request));
         }
 
+        var explicitSkillIds = request.SkillIds?.ToArray() ?? [];
         var run = new AgentRun();
         if (request.RunId is not null)
             run.RunId = request.RunId;
@@ -81,7 +85,7 @@ internal sealed class AgentRun : IAgentRun
         subscribe?.Invoke(run);
         _ = run.ExecuteAsync(
             chatClient, tools, toolCallingStrategy, pipeline, instructions, request, cancellationToken, registration,
-            contextWindowTokens);
+            contextWindowTokens, skills, explicitSkillIds);
         return run;
     }
 
@@ -106,7 +110,9 @@ internal sealed class AgentRun : IAgentRun
         AgentRunRequest request,
         CancellationToken cancellationToken,
         IDisposable? registration,
-        long? contextWindowTokens = null)
+        long? contextWindowTokens,
+        SkillSet? skills,
+        IReadOnlyList<string> explicitSkillIds)
     {
         var messages = new List<AiMessage>();
         if (!string.IsNullOrWhiteSpace(instructions))
@@ -136,12 +142,32 @@ internal sealed class AgentRun : IAgentRun
         {
             await pipeline.OnStartupAsync(context, runToken).ConfigureAwait(false);
 
+            SkillRun? skillRun = null;
+            if (skills is not null)
+            {
+                if (tools?.TryGet(SkillRun.ActivationToolName, out _) == true)
+                    throw new InvalidOperationException($"Tool '{SkillRun.ActivationToolName}' is reserved when skills are enabled.");
+
+                skillRun = await SkillRun.PrepareAsync(skills, explicitSkillIds, context).ConfigureAwait(false);
+            }
+            else if (explicitSkillIds.Count > 0)
+            {
+                throw new InvalidOperationException($"{nameof(AgentRunRequest.SkillIds)} requires skills to be configured for the agent.");
+            }
+
             AiResponse reply;
             var round = 0;
             while (true)
             {
                 var declarations = await toolCallingStrategy.GetToolDeclarationsAsync(
                     availableTools, context, round, runToken).ConfigureAwait(false);
+                if (skillRun is not null)
+                {
+                    if (declarations.Any(tool => tool.Identifier == SkillRun.ActivationToolName))
+                        throw new InvalidOperationException($"Tool '{SkillRun.ActivationToolName}' is reserved when skills are enabled.");
+                    if (skillRun.ActivationTool is { } activationTool)
+                        declarations = [.. declarations, activationTool];
+                }
 
                 await pipeline.OnBeforeAgentResponseAsync(context, runToken).ConfigureAwait(false);
                 reply = await RunModelRoundAsync(
@@ -160,10 +186,8 @@ internal sealed class AgentRun : IAgentRun
 
                 Raise(new AgentMessageUpdate(RunId, reply.Message));
 
-                var followUpMessages = await toolCallingStrategy.InvokeToolsAsync(
-                    context, calls,
-                    (call, ct) => InvokeToolAsync(tools, pipeline, context, call, ct),
-                    runToken).ConfigureAwait(false);
+                var followUpMessages = await InvokeRoundToolsAsync(
+                    tools, toolCallingStrategy, pipeline, context, calls, skillRun).ConfigureAwait(false);
 
                 foreach (var message in followUpMessages)
                 {
@@ -213,6 +237,39 @@ internal sealed class AgentRun : IAgentRun
         }
     }
 
+    private static async Task<IReadOnlyList<AiMessage>> InvokeRoundToolsAsync(
+        ToolRegistry? tools, IToolCallingStrategy strategy, AgentPipeline pipeline, AgentRunContext context,
+        IReadOnlyList<AiToolCallContent> calls, SkillRun? skillRun)
+    {
+        var token = context.CancellationToken;
+        Task<AiToolResultContent> InvokeRegisteredTool(AiToolCallContent call, CancellationToken ct) =>
+            InvokeToolAsync(tools, pipeline, context, call, ct);
+
+        if (skillRun is null || calls.All(call => call.Name != SkillRun.ActivationToolName))
+            return await strategy.InvokeToolsAsync(context, calls, InvokeRegisteredTool, token).ConfigureAwait(false);
+
+        // Skills are agent capabilities and can be activated immediately, including in lazy tool mode.
+        var skillResults = new List<AiContent>();
+        var otherCalls = new List<AiToolCallContent>();
+        foreach (var call in calls)
+        {
+            if (call.Name == SkillRun.ActivationToolName)
+                skillResults.Add(await InvokeToolAsync(tools, pipeline, context, call, token, skillRun).ConfigureAwait(false));
+            else
+                otherCalls.Add(call);
+        }
+
+        if (otherCalls.Count == 0)
+            return [new AiMessage(AiMessageRole.Tool, skillResults)];
+
+        var otherResults = await strategy.InvokeToolsAsync(context, otherCalls, InvokeRegisteredTool, token).ConfigureAwait(false);
+        if (otherResults.Count <= 0 || otherResults[0].Role != AiMessageRole.Tool)
+            return [new AiMessage(AiMessageRole.Tool, skillResults), .. otherResults];
+        skillResults.AddRange(otherResults[0].Contents);
+        return [new AiMessage(AiMessageRole.Tool, skillResults), .. otherResults.Skip(1)];
+
+    }
+
     /// <summary>
     ///     Runs the middleware tool chain around one tool invocation: the before hook, the
     ///     tool itself, then — unconditionally — the after hook. Whatever happens in the
@@ -223,16 +280,19 @@ internal sealed class AgentRun : IAgentRun
     /// </summary>
     private static async Task<AiToolResultContent> InvokeToolAsync(
         ToolRegistry? tools, AgentPipeline pipeline, AgentRunContext context, AiToolCallContent call,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, SkillRun? skillRun = null)
     {
         var effectiveCall = call;
         AiToolResultContent? result = null;
         Exception? error = null;
+        string? activatedSkillId = null;
         try
         {
             effectiveCall = await pipeline.OnBeforeToolCallAsync(context, call, cancellationToken)
                 .ConfigureAwait(false);
-            result = await ExecuteToolAsync(tools, context, effectiveCall).ConfigureAwait(false);
+            result = skillRun is not null && effectiveCall.Name == SkillRun.ActivationToolName
+                ? skillRun.Activate(effectiveCall, cancellationToken, out activatedSkillId)
+                : await ExecuteToolAsync(tools, context, effectiveCall).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -246,6 +306,9 @@ internal sealed class AgentRun : IAgentRun
         // run and ends it as failed. Both propagate only after the after hook has run.
         if (error is OperationCanceledException or MiddlewareFailedException)
             ExceptionDispatchInfo.Capture(error).Throw();
+
+        if (activatedSkillId is not null && finalResult is { IsError: false })
+            skillRun!.ConfirmActivation(activatedSkillId);
 
         return finalResult ?? new AiToolResultContent(
             effectiveCall.CallId,

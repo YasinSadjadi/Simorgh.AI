@@ -26,6 +26,51 @@ run.Updated += update =>
 var answer = await run.Completion;
 ```
 
+## Skills
+
+Give an agent a collection of text instructions that it can discover and load when relevant.
+
+```csharp
+using Simorgh.AI.Abstractions.Agent;
+using Simorgh.AI.Abstractions.Messages;
+using Simorgh.AI.Abstractions.Skills;
+using Simorgh.AI.Core.Agent;
+using Simorgh.AI.Core.Skills;
+using Simorgh.AI.Extensions.Tools;
+
+var refundPolicy = new SkillDto(
+    id: "refund-policy",
+    title: "Refund policy",
+    whenToUse: "Use when a customer asks about refund eligibility or the refund process.",
+    tags: ["refund", "billing"],
+    content: "Ask for the order date and payment method before explaining refund eligibility.");
+
+var agent = AgentService.Initialize(chatClient, new InstantToolCallingStrategy(), new AgentServiceOptions
+{
+    Skills = new SkillSet([refundPolicy])
+});
+
+var request = new AgentRunRequest(
+    [AiMessage.FromText(AiMessageRole.User, "Please use $refund-policy to explain my options.")]);
+var answer = await agent.RunAsync(request);
+```
+
+For a request such as “How do I get a refund?”, the agent searches the latest user message at the
+start of the run. It sends the model each candidate's id, title, and `WhenToUse`. When a skill is
+relevant, the model calls `activate_skill` to read its instructions. That tool name is reserved
+on agents configured with skills and is available in both Instant and Lazy tool-calling modes.
+
+An inline `$skill-id` in the latest user message loads the named skill before the first model call.
+The chat UI can also set `AgentRunRequest.SkillIds` to the ids selected by the user. Unknown inline
+mentions, escaped mentions, and mentions inside Markdown code are treated as ordinary text. An
+unknown id in `SkillIds` fails the run. Each skill needs a unique id of up to 64 lowercase ASCII
+letters or digits, with single hyphens allowed between groups.
+
+`SkillSet` takes a snapshot of an application-provided `IEnumerable<SkillDto>`, including a query
+passed as `IQueryable<SkillDto>`. The default provider scans the title, tags, usage guidance, and
+content in memory and returns up to five ranked matches. Set `maxResults` to change the limit or
+pass your own `ISkillSearchProvider`. Skill search failures surface as run warnings.
+
 ## Runtime tools
 
 Tools obtained from an API or another source can be registered alongside `IToolService`

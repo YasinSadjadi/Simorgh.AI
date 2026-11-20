@@ -59,6 +59,7 @@ public sealed class AgentService(
             _chatClient, _toolCallingStrategy, new AgentServiceOptions
             {
                 Tools = _options.Tools,
+                Skills = _options.Skills,
                 Middlewares = _pipeline.Middlewares,
                 Instructions = instructions,
                 RunRegistry = _options.RunRegistry,
@@ -75,6 +76,7 @@ public sealed class AgentService(
                 _chatClient, _toolCallingStrategy, new AgentServiceOptions
                 {
                     Tools = _options.Tools,
+                    Skills = _options.Skills,
                     Middlewares = _pipeline.Middlewares,
                     Instructions = _options.Instructions,
                     RunRegistry = runRegistry,
@@ -106,6 +108,6 @@ public sealed class AgentService(
             ? throw new ArgumentNullException(nameof(request))
             : AgentRun.Start(
                 _chatClient, _options.Tools, _toolCallingStrategy, _pipeline, _options.Instructions, request,
-                cancellationToken, _options.RunRegistry, subscribe, _options.ContextWindowTokens);
+                cancellationToken, _options.RunRegistry, subscribe, _options.ContextWindowTokens, _options.Skills);
     }
 }
